@@ -128,8 +128,12 @@ def _call_groq_vision(image_bytes: bytes, prompt: str) -> str:
         if prompt_file.exists():
             data = yaml.safe_load(prompt_file.read_text(encoding="utf-8"))
             system_prompt = data.get("system_prompt", system_prompt)
+            
+        import datetime
+        current_time_str = datetime.datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+        system_prompt += f"\n\nCurrent system time: {current_time_str}"
 
-        client = Groq(api_key=api_key)
+        client = Groq(api_key=api_key, timeout=15.0, max_retries=0)
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         response = client.chat.completions.create(
             model="qwen/qwen3.6-27b",
@@ -146,7 +150,7 @@ def _call_groq_vision(image_bytes: bytes, prompt: str) -> str:
                     ],
                 },
             ],
-            max_tokens=1024,
+            max_tokens=4096,
         )
         return response.choices[0].message.content or "No description returned."
 

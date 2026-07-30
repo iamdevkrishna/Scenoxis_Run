@@ -21,7 +21,7 @@ _YT_PATTERN = re.compile(
 
 # ── Page analysis trigger phrases ───────────────────────────────────────────
 _PAGE_PHRASES = re.compile(
-    r"\b(?:analys[ei]s?|describe|explain|summarise?|summarize|what(?:'s| is) (?:on|this)|look at)[\s\w]*(?:page|screen|window|tab)?\b",
+    r"\b(?:analys[ei]s?|describe|explain|summarise?|summarize|what(?:'s| is|s) (?:on|this|going on)|look at|tell me what)[\s\w]*(?:page|screen|window|tab)?\b",
     re.IGNORECASE,
 )
 

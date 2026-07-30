@@ -77,6 +77,8 @@ def _get_llm() -> ChatGroq:
             temperature=prompt_cfg.get("temperature", 0.4),
             max_tokens=prompt_cfg.get("max_tokens", 1024),
             api_key=os.environ.get("GROQ_API_KEY", ""),
+            timeout=15.0,
+            max_retries=0,
         )
     return _llm
 
@@ -135,7 +137,11 @@ def node_page_analyze(state: AgentState) -> AgentState:
     else:
         answer = analyze_current_page.invoke({"instruction": instruction})
         
-    return {**state, "result": answer, "is_thinking": False}
+    messages = list(state.get("messages", []))
+    messages.append(HumanMessage(content=query))
+    messages.append(AIMessage(content=answer))
+        
+    return {**state, "result": answer, "messages": messages, "is_thinking": False}
 
 
 def node_yt_download(state: AgentState) -> AgentState:
@@ -164,6 +170,9 @@ def node_groq_chat(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context", [])
     messages       = list(state.get("messages", []))
 
+    # Always append the user's current query to the message history
+    messages.append(HumanMessage(content=query))
+
     # Build system prompt with injected memory context
     prompt_cfg = _load_prompt("chat_system.yaml")
     sys_template = prompt_cfg.get(
@@ -172,10 +181,10 @@ def node_groq_chat(state: AgentState) -> AgentState:
     )
     ctx_str = "\n".join(f"- {m}" for m in memory_context) if memory_context else "None available."
     system_content = sys_template.format(memory_context=ctx_str)
-
-    # Prime messages if this is the first turn
-    if not messages:
-        messages = [HumanMessage(content=query)]
+    
+    import datetime
+    current_time_str = datetime.datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+    system_content += f"\n\nCurrent system time: {current_time_str}"
 
     full_messages = [SystemMessage(content=system_content)] + messages
 
@@ -184,7 +193,14 @@ def node_groq_chat(state: AgentState) -> AgentState:
         response = llm.invoke(full_messages)
     except Exception as exc:
         log.error("Groq chat failed: %s", exc)
-        return {**state, "result": f"LLM error: {exc}", "is_thinking": False}
+        err_str = str(exc)
+        if "tool call validation failed" in err_str or "400" in err_str or "Failed to call a function" in err_str:
+            friendly_err = "I'm sorry, I got a little confused trying to answer that. Could you please rephrase your follow-up?"
+        else:
+            friendly_err = f"LLM error: {exc}"
+        
+        messages.append(AIMessage(content=friendly_err))
+        return {**state, "result": friendly_err, "messages": messages, "is_thinking": False}
 
     # Append the model's response to the running history
     messages = messages + [response]
@@ -217,7 +233,12 @@ def node_groq_chat(state: AgentState) -> AgentState:
             result_text = final_response.content or ""
         except Exception as exc:
             log.error("Groq post-tool call failed: %s", exc)
-            result_text = tool_result
+            err_str = str(exc)
+            if "tool call validation failed" in err_str or "400" in err_str or "Failed to call a function" in err_str:
+                result_text = "I'm sorry, I got a little confused trying to answer that. Could you please rephrase your follow-up?"
+            else:
+                result_text = f"LLM error: {exc}"
+            messages.append(AIMessage(content=result_text))
 
         return {
             **state,

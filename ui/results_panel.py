@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QTextBrowser,
     QProgressBar, QFrame, QSizePolicy, QScrollArea,
-    QStackedWidget, QAbstractItemView,
+    QStackedWidget, QAbstractItemView, QToolButton, QLineEdit, QSpacerItem
 )
 
 from ui.result_item import ResultItem, ResultKind
@@ -362,6 +362,7 @@ class BorderScanOverlay(QWidget):
 class ResultsPanel(QWidget):
     yt_format_selected = Signal(str, str)
     app_selected       = Signal(str)
+    followup_submitted = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -398,6 +399,13 @@ class ResultsPanel(QWidget):
         self._stack.addWidget(self._list_widget)
 
         # Page 2: chat / page analysis
+        self._chat_page = QWidget()
+        self._chat_page.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self._chat_page.setAutoFillBackground(False)
+        chat_layout = QVBoxLayout(self._chat_page)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(0)
+
         self._chat_pane = QTextBrowser()
         self._chat_pane.setObjectName("ChatPane")
         self._chat_pane.setOpenExternalLinks(True)
@@ -407,7 +415,56 @@ class ResultsPanel(QWidget):
         vp2 = self._chat_pane.viewport()
         vp2.setAutoFillBackground(False)
         vp2.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self._stack.addWidget(self._chat_pane)
+        chat_layout.addWidget(self._chat_pane)
+
+        # Hovering + / Follow-up Input Box
+        self._followup_container = QWidget()
+        self._followup_container.setFixedHeight(40)
+        fu_layout = QHBoxLayout(self._followup_container)
+        fu_layout.setContentsMargins(12, 0, 12, 12)
+
+        self._followup_input = QLineEdit()
+        self._followup_input.setObjectName("FollowUpInput")
+        self._followup_input.setPlaceholderText("Ask a follow up...")
+        self._followup_input.returnPressed.connect(self._on_followup_submitted)
+        self._followup_input.hide()
+
+        self._btn_followup = QToolButton()
+        self._btn_followup.setText("+")
+        self._btn_followup.setToolTip("Ask a follow up (Tab)")
+        self._btn_followup.setObjectName("FollowUpBtn")
+        self._btn_followup.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_followup.clicked.connect(self.show_followup_input)
+        self._btn_followup.setFixedSize(28, 28)
+        self._btn_followup.setStyleSheet("""
+            QToolButton {
+                background-color: rgba(255, 255, 255, 20);
+                border: 1px solid rgba(255, 255, 255, 40);
+                border-radius: 14px;
+                color: rgba(255, 255, 255, 200);
+                font-size: 20px; font-weight: bold;
+                padding-bottom: 2px;
+            }
+            QToolButton:hover { background-color: rgba(255, 255, 255, 40); }
+        """)
+        self._followup_input.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(0, 0, 0, 60);
+                border: 1px solid rgba(255, 255, 255, 30);
+                border-radius: 6px; color: rgba(255, 255, 255, 240);
+                padding: 4px 8px; font-size: 13px; font-family: 'Segoe UI Variable', sans-serif;
+            }
+        """)
+
+        self._fu_spacer_left = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._fu_spacer_right = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        fu_layout.addItem(self._fu_spacer_left)
+        fu_layout.addWidget(self._followup_input)
+        fu_layout.addWidget(self._btn_followup)
+        fu_layout.addItem(self._fu_spacer_right)
+
+        chat_layout.addWidget(self._followup_container)
+        self._stack.addWidget(self._chat_page)
 
         # Page 3: shimmer thinking animation
         self._thinking = ShimmerWidget()
@@ -438,6 +495,29 @@ class ResultsPanel(QWidget):
         self._thinking.start()
         self.setVisible(True)
         self._set_height_for_thinking()
+        self.reset_followup()
+
+    def reset_followup(self):
+        self._followup_input.clear()
+        self._followup_input.hide()
+        self._btn_followup.show()
+        self._fu_spacer_left.changeSize(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._fu_spacer_right.changeSize(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._followup_container.layout().invalidate()
+
+    def show_followup_input(self):
+        self._btn_followup.hide()
+        self._fu_spacer_left.changeSize(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._fu_spacer_right.changeSize(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._followup_container.layout().invalidate()
+        self._followup_input.show()
+        self._followup_input.setFocus()
+        
+    def _on_followup_submitted(self):
+        text = self._followup_input.text().strip()
+        if text:
+            self.reset_followup()
+            self.followup_submitted.emit(text)
 
     def show_results(self, items: list[ResultItem]):
         self._thinking.stop()
@@ -469,6 +549,7 @@ class ResultsPanel(QWidget):
         self._progress_bar.hide()
         self._current_items = []
         self._stack.setCurrentIndex(0)
+        self.reset_followup()
         self.setVisible(False)
 
     def start_border_scan(self):
@@ -569,12 +650,14 @@ class ResultsPanel(QWidget):
           ul,ol {{ margin: 4px 0; padding-left: 18px; }}
           li   {{ margin: 1px 0; }}
           p    {{ margin: 3px 0; }}
+          blockquote {{ margin: 4px 0 12px 10px; padding-left: 12px; border-left: 3px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); font-style: italic; }}
         </style>
         {html}
         """
         self._chat_pane.setHtml(styled)
         self._stack.setCurrentIndex(2)
-        self._adjust_chat_height()
+        QTimer.singleShot(10, self._adjust_chat_height)
+        QTimer.singleShot(20, self._scroll_chat_to_bottom)
 
     def _on_item_activated(self, litem: QListWidgetItem):
         ri: ResultItem = litem.data(Qt.ItemDataRole.UserRole)
@@ -599,8 +682,12 @@ class ResultsPanel(QWidget):
 
     def _adjust_chat_height(self):
         doc_h = self._chat_pane.document().size().height()
-        target = min(int(doc_h) + 20, 320)
-        self.setFixedHeight(max(target, 50))
+        target = min(int(doc_h) + 60, 400)
+        self.setFixedHeight(max(target, 100))
+
+    def _scroll_chat_to_bottom(self):
+        sb = self._chat_pane.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _set_height_for_thinking(self):
         self.setFixedHeight(36)

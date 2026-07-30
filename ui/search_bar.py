@@ -22,6 +22,7 @@ class SearchBar(QLineEdit):
     arrow_down    = Signal()
     escape_pressed = Signal()
     enter_pressed  = Signal()
+    tab_pressed    = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +35,11 @@ class SearchBar(QLineEdit):
         self.setTextMargins(2, 0, 0, 0)
         self.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, 0)
         self.setFrame(False)
+
+    def focusNextPrevChild(self, next: bool) -> bool:
+        """Catch Tab key before Qt's default focus navigation eats it."""
+        self.tab_pressed.emit()
+        return True
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()

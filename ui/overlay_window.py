@@ -306,11 +306,13 @@ class OverlayWindow(QWidget):
         self._search.textChanged.connect(self._on_text_changed)
         self._search.escape_pressed.connect(self.hide_overlay)
         self._search.enter_pressed.connect(self._on_enter)
+        self._search.tab_pressed.connect(self._on_tab_pressed)
         self._search.arrow_up.connect(self._results.select_prev)
         self._search.arrow_down.connect(self._results.select_next)
 
         self._results.app_selected.connect(self._launch_exe)
         self._results.yt_format_selected.connect(self._start_yt_download)
+        self._results.followup_submitted.connect(self._on_followup)
 
     # ─────────────────────────────────────────────────────────────────────
     # Show / hide with animations
@@ -375,6 +377,7 @@ class OverlayWindow(QWidget):
             self._results.clear()
             self._badge.hide()
             self._divider.hide()
+            self._conversation_messages = []
             self.hide()
             self.setWindowOpacity(0.0)
             self._relayout()
@@ -490,6 +493,7 @@ class OverlayWindow(QWidget):
             self._results.clear()
             self._badge.hide()
             self._divider.hide()
+            self._conversation_messages = []
             self._relayout()
             return
 
@@ -536,16 +540,23 @@ class OverlayWindow(QWidget):
         self._debounce.stop()
         self._dispatch_agent()
 
+    def _on_tab_pressed(self):
+        # If chat page is visible, tab should focus the follow-up input
+        if self._results._stack.currentIndex() == 2:
+            self._results.show_followup_input()
+
+    def _on_followup(self, text: str):
+        # Don't touch the main search bar, just run the agent with the new text
+        self._dispatch_agent_with_query(text)
+
     def _dispatch_agent(self):
         query = self._search.text().strip()
         if not query:
             return
+        self._dispatch_agent_with_query(query)
 
-        # ── Clear stale conversation so each new query starts fresh ──
-        # Without this, old messages from "who is Modi" leak into
-        # "who is Sachin Tendulkar" causing hallucinated cross-answers.
-        self._conversation_messages = []
-
+    def _dispatch_agent_with_query(self, query: str):
+        self._current_agent_query = query
         from agent.classifier import classify
         intent = classify(query, app_idx.get_index())
 
@@ -694,7 +705,7 @@ class OverlayWindow(QWidget):
         self._agent_worker = worker
 
     def _on_agent_finished(self, query: str, state: dict):
-        if self._search.text().strip() != query:
+        if getattr(self, "_current_agent_query", "") != query:
             return
 
         self._results.stop_border_scan()
@@ -703,6 +714,9 @@ class OverlayWindow(QWidget):
         msgs   = state.get("messages", [])
         if msgs:
             self._conversation_messages = msgs
+            history_text = self._format_chat_history(msgs)
+            if history_text:
+                result = history_text
 
         if intent == "page_analyze":
             ri = ResultItem(kind=ResultKind.PAGE, title="", raw_text=result)
@@ -724,8 +738,28 @@ class OverlayWindow(QWidget):
 
         self._relayout()
 
+    def _format_chat_history(self, msgs: list) -> str:
+        from langchain_core.messages import HumanMessage, AIMessage
+        
+        display_msgs = [m for m in msgs if isinstance(m, (HumanMessage, AIMessage))]
+        display_msgs = display_msgs[-10:]
+        
+        formatted = []
+        for m in display_msgs:
+            if isinstance(m, HumanMessage):
+                formatted.append(f"**You:**\n> {m.content}\n")
+            elif isinstance(m, AIMessage):
+                content = m.content or ""
+                if not content.strip() and getattr(m, "tool_calls", None):
+                    continue
+                if content.startswith("[Vision Analysis of User's Screen]:\n"):
+                    content = content.replace("[Vision Analysis of User's Screen]:\n", "*(Analyzed screen)*\n\n", 1)
+                formatted.append(f"**Scenoxis:**\n{content}\n")
+                
+        return "\n<br/>\n".join(formatted)
+
     def _on_agent_error(self, query: str, msg: str):
-        if self._search.text().strip() != query:
+        if getattr(self, "_current_agent_query", "") != query:
             return
 
         self._results.stop_border_scan()
