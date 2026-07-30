@@ -1,0 +1,22 @@
+# prompts/memory_write_decision.yaml
+# Used by the hybrid memory write-decision node.
+# {user_msg} and {assistant_response} are injected at runtime.
+
+decision_prompt: |
+  Does the following conversation exchange reveal a specific, durable personal
+  fact about the user that is worth storing for future reference?
+
+  A durable fact is something like:
+  - The user's name, age, location, job, hobbies, preferences
+  - Relationships, goals, recurring tasks, or important dates
+  - Technical setup (OS, tools, languages they use)
+
+  NOT worth storing:
+  - General questions (weather, news, trivia)
+  - One-off tasks (calculations, app launches)
+  - Clarification or follow-up messages with no new personal content
+
+  Reply with exactly one word: YES or NO.
+
+  User: {user_msg}
+  Assistant: {assistant_response}

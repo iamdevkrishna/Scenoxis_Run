@@ -1,0 +1,39 @@
+# UI
+PySide6>=6.7
+
+# LLM orchestration
+langchain>=0.3
+langchain-core>=0.3
+langchain-groq>=0.2
+langgraph>=0.2
+langchain-huggingface>=0.1
+
+# Vector store / RAG
+chromadb>=0.5
+sentence-transformers>=3.0
+
+# LLM providers
+groq>=0.9
+
+# Tools
+tavily-python>=0.3
+yt-dlp>=2024.1
+rapidfuzz>=3.0
+asteval>=1.0
+Pillow>=10.0
+
+# pywin32 for .lnk parsing + RegisterHotKey
+pywin32>=306
+
+# Env / config / prompts
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# App-layer encryption for ChromaDB memory
+cryptography>=43.0
+
+# Markdown rendering for chat responses
+markdown>=3.7
+
+# File watching for prompt hot-reload
+watchdog>=4.0

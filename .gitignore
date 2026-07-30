@@ -1,0 +1,39 @@
+# Environment & secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ChromaDB / data (keep structure, ignore content)
+data/chroma/
+data/.memory_key
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+Desktop.ini

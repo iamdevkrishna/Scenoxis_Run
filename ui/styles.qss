@@ -1,0 +1,145 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ui/styles.qss — Scenoxis Run
+   Monochrome frosted glass. Pure black & white. No colors.
+   ALL backgrounds transparent — DWM Acrylic + paintEvent do the visuals.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Global: transparent everything ───────────────────────────────────── */
+QWidget#ScenoxisOverlay,
+QFrame#GlassCard,
+QWidget#ResultsPanel,
+QStackedWidget {
+    background: transparent;
+}
+
+/* ── Search bar ───────────────────────────────────────────────────────── */
+QLineEdit#SearchBar {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.95);
+    font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    font-size: 17px;
+    font-weight: 400;
+    padding: 0px 2px;
+    selection-background-color: rgba(255, 255, 255, 0.12);
+    selection-color: #ffffff;
+}
+
+QLineEdit#SearchBar::placeholder {
+    color: rgba(255, 255, 255, 0.18);
+    font-weight: 300;
+}
+
+/* ── Divider — barely visible ─────────────────────────────────────────── */
+QFrame#Divider {
+    background: rgba(255, 255, 255, 0.06);
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}
+
+/* ── Intent badge — minimal ghost pill ────────────────────────────────── */
+QLabel#IntentBadge {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    color: rgba(255, 255, 255, 0.25);
+    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 1px 6px;
+}
+
+/* ── Results list ─────────────────────────────────────────────────────── */
+QListWidget#ResultsList {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 2px 4px;
+}
+
+QListWidget#ResultsList::item {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.88);
+    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-size: 13px;
+    padding: 0px 2px;
+    margin: 1px 2px;
+}
+
+QListWidget#ResultsList::item:selected {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+QListWidget#ResultsList::item:hover:!selected {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* ── Chat pane ────────────────────────────────────────────────────────── */
+QTextBrowser#ChatPane {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-size: 13px;
+    padding: 6px 16px;
+    selection-background-color: rgba(255, 255, 255, 0.10);
+}
+
+/* ── Thinking shimmer container ───────────────────────────────────────── */
+QLabel#ThinkingLabel {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.20);
+    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    padding: 4px 16px;
+}
+
+/* ── Download progress ────────────────────────────────────────────────── */
+QProgressBar#DownloadProgress {
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    border-radius: 1px;
+    height: 2px;
+    color: transparent;
+    margin: 2px 16px;
+}
+
+QProgressBar#DownloadProgress::chunk {
+    background: rgba(255, 255, 255, 0.40);
+    border-radius: 1px;
+}
+
+/* ── Scrollbar — ghost thin ───────────────────────────────────────────── */
+QScrollBar:vertical {
+    background: transparent;
+    border: none;
+    width: 3px;
+    margin: 4px 1px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 1px;
+    min-height: 24px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal          { height: 0; }
+
+/* ── Force viewport transparency ──────────────────────────────────────── */
+QAbstractScrollArea,
+QAbstractScrollArea > QWidget,
+QAbstractScrollArea::viewport {
+    background: transparent;
+}
