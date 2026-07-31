@@ -180,6 +180,9 @@ class AppIndex:
                         if entry:
                             entries.append(entry)
 
+        # Scan UWP apps
+        self._scan_uwp_apps(entries)
+
         # Seed with always-available system apps
         seen_sys: set[str] = set()
         for app_name, app_path in SYSTEM_APPS:
@@ -241,6 +244,39 @@ class AppIndex:
             icon_path=icon_path or exe_path,
             lnk_path=lnk_path,
         )
+
+    def _scan_uwp_apps(self, entries: list[AppEntry]) -> None:
+        """Fetch UWP (Windows Store) apps via PowerShell."""
+        try:
+            import subprocess
+            import json
+            # Fast PowerShell command to get installed apps and return JSON
+            cmd = ['powershell', '-NoProfile', '-Command', 'Get-StartApps | Select-Object -Property Name, AppID | ConvertTo-Json -Compress']
+            
+            # Use CREATE_NO_WINDOW so a cmd box doesn't briefly flash on screen!
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, timeout=10.0)
+            if result.returncode != 0 or not result.stdout.strip():
+                return
+                
+            data = json.loads(result.stdout)
+            if not isinstance(data, list):
+                data = [data]
+                
+            for item in data:
+                name = item.get("Name")
+                appid = item.get("AppID")
+                if name and appid:
+                    exe_path = f"shell:AppsFolder\\{appid}"
+                    entries.append(AppEntry(
+                        name=name,
+                        exe_path=exe_path,
+                        icon_path=None
+                    ))
+        except Exception as exc:
+            log.warning("UWP app scan failed: %s", exc)
 
     def _schedule_refresh(self) -> None:
         self._timer = threading.Timer(REFRESH_INTERVAL, self._background_refresh)

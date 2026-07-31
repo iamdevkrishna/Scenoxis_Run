@@ -406,6 +406,7 @@ class ResultsPanel(QWidget):
     app_selected       = Signal(str)
     followup_submitted = Signal(str)
     yt_folder_change_requested = Signal()
+    chat_height_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -754,7 +755,9 @@ class ResultsPanel(QWidget):
 
         self._stack.setCurrentIndex(2)
         QTimer.singleShot(10, self._adjust_chat_height)
-        QTimer.singleShot(20, self._scroll_chat_to_bottom)
+        
+        if item.action_data.get("scroll_to_bottom", True):
+            QTimer.singleShot(20, self._scroll_chat_to_bottom)
 
     def _on_item_activated(self, litem: QListWidgetItem):
         ri: ResultItem = litem.data(Qt.ItemDataRole.UserRole)
@@ -784,6 +787,7 @@ class ResultsPanel(QWidget):
         doc_h = self._chat_pane.document().size().height()
         target = min(int(doc_h) + 60, 400)
         self.setFixedHeight(max(target, 100))
+        self.chat_height_changed.emit()
 
     def _scroll_chat_to_bottom(self):
         sb = self._chat_pane.verticalScrollBar()

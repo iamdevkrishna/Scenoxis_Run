@@ -314,6 +314,7 @@ class OverlayWindow(QWidget):
         self._results.yt_format_selected.connect(self._start_yt_download)
         self._results.followup_submitted.connect(self._on_followup)
         self._results.yt_folder_change_requested.connect(self._on_yt_folder_change)
+        self._results.chat_height_changed.connect(self._relayout)
 
     # ─────────────────────────────────────────────────────────────────────
     # Show / hide with animations
@@ -607,14 +608,20 @@ class OverlayWindow(QWidget):
         self._results.show_results([ri])
         self._relayout()
 
-    def _show_chat_result(self, html: str = "", text: str = "", show_followup: bool = True):
+    def _show_chat_result(self, html: str = "", text: str = "", action_data: dict = None):
         self._results.stop_border_scan()
+        if action_data is None:
+            action_data = {}
+        # Ensure show_followup is true by default unless specified
+        if "show_followup" not in action_data:
+            action_data["show_followup"] = True
+            
         ri = ResultItem(
             kind=ResultKind.CHAT,
             title="",
             raw_text=text,
             html=html,
-            action_data={"show_followup": show_followup}
+            action_data=action_data
         )
         self._divider.show()
         self._results.show_results([ri])
@@ -681,42 +688,23 @@ class OverlayWindow(QWidget):
     # Background task launchers
     # ─────────────────────────────────────────────────────────────────────
 
-    def _run_agent(self, query: str):
-        # Instead of killing the blocked thread, just keep it alive so it doesn't GC crash
-        # and ignore its output by tracking the latest thread.
-        worker = AgentWorker(query, self._active_tab_url, self._conversation_messages)
-        thread = QThread()
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_agent_finished)
-        worker.error.connect(self._on_agent_error)
-        worker.finished.connect(thread.quit)
-        worker.error.connect(thread.quit)
-        
-        self._active_threads.append(thread)
-        
-        def cleanup(t=thread, w=worker):
-            t.deleteLater()
-            w.deleteLater()
-            if t in self._active_threads:
-                self._active_threads.remove(t)
-        
-        thread.finished.connect(cleanup)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
 
-        self._agent_thread = thread
-        self._agent_worker = worker
 
     def _on_agent_finished(self, query: str, state: dict):
         if getattr(self, "_current_agent_query", "") != query:
+            log.info("Query mismatch! expected %s got %s", getattr(self, "_current_agent_query", ""), query)
             return
 
         self._results.stop_border_scan()
         result = state.get("result", "")
         intent = state.get("intent", "chat")
         msgs   = state.get("messages", [])
+        is_first = True
         if msgs:
+            from langchain_core.messages import HumanMessage, AIMessage
+            display_msgs = [m for m in msgs if isinstance(m, (HumanMessage, AIMessage))]
+            is_first = len(display_msgs) <= 2
+            
             self._conversation_messages = msgs
             history_html = self._format_chat_history_html(msgs)
             if history_html:
@@ -728,7 +716,7 @@ class OverlayWindow(QWidget):
             html_result = ""
 
         if intent == "page_analyze":
-            ri = ResultItem(kind=ResultKind.PAGE, title="", raw_text=result)
+            ri = ResultItem(kind=ResultKind.PAGE, title="", raw_text=result, html=html_result, action_data={"scroll_to_bottom": not is_first})
             self._divider.show()
             self._results.show_results([ri])
             
@@ -740,9 +728,9 @@ class OverlayWindow(QWidget):
             # Show ourselves again
             self.show()
         elif intent in ("app_launch", "calc"):
-            self._show_chat_result(html=html_result, text=result)
+            self._show_chat_result(html=html_result, text=result, action_data={"scroll_to_bottom": not is_first})
         else:
-            self._show_chat_result(html=html_result, text=result)
+            self._show_chat_result(html=html_result, text=result, action_data={"scroll_to_bottom": not is_first})
 
         self._relayout()
 
@@ -827,7 +815,7 @@ class OverlayWindow(QWidget):
 
     def _run_agent(self, query: str, image_bytes: bytes = None):
         # Instead of killing the blocked thread, just keep it alive so it doesn't GC crash
-        worker = AgentWorker(query, active_tab_url=None, messages=self._conversation_messages, image_bytes=image_bytes)
+        worker = AgentWorker(query, active_tab_url=self._active_tab_url, messages=self._conversation_messages, image_bytes=image_bytes)
         thread = QThread()
         worker.moveToThread(thread)
         
@@ -948,9 +936,9 @@ class OverlayWindow(QWidget):
     def _on_yt_download_finished(self, result: dict):
         if result.get("success"):
             path = result.get("filepath", "")
-            self._show_chat_result(text=f"✓ Download complete:\n`{path}`", show_followup=False)
+            self._show_chat_result(text=f"✓ Download complete:\n`{path}`", action_data={"show_followup": False})
         else:
-            self._show_chat_result(text=f"✗ Download failed: {result.get('error')}")
+            self._show_chat_result(text=f"✗ Download failed: {result.get('error')}", action_data={"show_followup": False})
         self._relayout()
 
     def _launch_exe(self, exe_path: str):

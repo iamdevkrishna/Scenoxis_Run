@@ -107,7 +107,15 @@ def main() -> int:
         log.info("Alt+Space hotkey registered — press to open Scenoxis Run")
 
     # ── Optional: show window once on first launch ────────────────────────
-    QTimer.singleShot(200, window.show_overlay)
+    def _check_ready_and_show():
+        if mem_thread.is_alive():
+            # Still warming up, check again in 100ms
+            QTimer.singleShot(100, _check_ready_and_show)
+        else:
+            log.info("Initialization complete, showing UI")
+            window.show_overlay()
+
+    _check_ready_and_show()
 
     # ── Event loop ────────────────────────────────────────────────────────
     exit_code = app.exec()

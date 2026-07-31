@@ -17,7 +17,10 @@ log = logging.getLogger(__name__)
 def _launch_exe(path: str) -> None:
     """Launch an executable or file using the best method for its type."""
     lower = path.lower()
-    if lower.endswith(".exe"):
+    if lower.startswith("shell:appsfolder"):
+        # UWP App launch
+        os.startfile(path)
+    elif lower.endswith(".exe"):
         subprocess.Popen(
             [path],
             shell=False,
