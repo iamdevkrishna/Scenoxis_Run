@@ -313,6 +313,7 @@ class OverlayWindow(QWidget):
         self._results.app_selected.connect(self._launch_exe)
         self._results.yt_format_selected.connect(self._start_yt_download)
         self._results.followup_submitted.connect(self._on_followup)
+        self._results.yt_folder_change_requested.connect(self._on_yt_folder_change)
 
     # ─────────────────────────────────────────────────────────────────────
     # Show / hide with animations
@@ -606,11 +607,14 @@ class OverlayWindow(QWidget):
         self._results.show_results([ri])
         self._relayout()
 
-    def _show_chat_result(self, text: str):
+    def _show_chat_result(self, html: str = "", text: str = "", show_followup: bool = True):
+        self._results.stop_border_scan()
         ri = ResultItem(
             kind=ResultKind.CHAT,
             title="",
             raw_text=text,
+            html=html,
+            action_data={"show_followup": show_followup}
         )
         self._divider.show()
         self._results.show_results([ri])
@@ -628,7 +632,7 @@ class OverlayWindow(QWidget):
             grouped[f.get("category", "Other")].append(f)
             
         # Define display order
-        order = ["Video + Audio", "Video Only", "Audio Only", "Other"]
+        order = ["Video + Audio (HQ Muxed)", "Video + Audio", "Video Only", "Audio Only", "Other"]
         
         for cat in order:
             if cat not in grouped or not grouped[cat]:
@@ -714,9 +718,14 @@ class OverlayWindow(QWidget):
         msgs   = state.get("messages", [])
         if msgs:
             self._conversation_messages = msgs
-            history_text = self._format_chat_history(msgs)
-            if history_text:
-                result = history_text
+            history_html = self._format_chat_history_html(msgs)
+            if history_html:
+                result = ""
+                html_result = history_html
+            else:
+                html_result = ""
+        else:
+            html_result = ""
 
         if intent == "page_analyze":
             ri = ResultItem(kind=ResultKind.PAGE, title="", raw_text=result)
@@ -731,15 +740,15 @@ class OverlayWindow(QWidget):
             # Show ourselves again
             self.show()
         elif intent in ("app_launch", "calc"):
-            # These are handled instantly — should not reach here, but just in case
-            self._show_chat_result(result)
+            self._show_chat_result(html=html_result, text=result)
         else:
-            self._show_chat_result(result)
+            self._show_chat_result(html=html_result, text=result)
 
         self._relayout()
 
-    def _format_chat_history(self, msgs: list) -> str:
+    def _format_chat_history_html(self, msgs: list) -> str:
         from langchain_core.messages import HumanMessage, AIMessage
+        import markdown
         
         display_msgs = [m for m in msgs if isinstance(m, (HumanMessage, AIMessage))]
         display_msgs = display_msgs[-10:]
@@ -747,23 +756,38 @@ class OverlayWindow(QWidget):
         formatted = []
         for m in display_msgs:
             if isinstance(m, HumanMessage):
-                formatted.append(f"**You:**\n> {m.content}\n")
+                html_content = markdown.markdown(m.content, extensions=["fenced_code", "tables", "nl2br"])
+                bubble = f'''
+                <div style="margin: 8px 0; margin-left: 40px; text-align: right;">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 11px; margin: 0; padding: 0;">You</div>
+                    {html_content}
+                </div>
+                '''
+                formatted.append(bubble)
             elif isinstance(m, AIMessage):
                 content = m.content or ""
                 if not content.strip() and getattr(m, "tool_calls", None):
                     continue
                 if content.startswith("[Vision Analysis of User's Screen]:\n"):
                     content = content.replace("[Vision Analysis of User's Screen]:\n", "*(Analyzed screen)*\n\n", 1)
-                formatted.append(f"**Scenoxis:**\n{content}\n")
                 
-        return "\n<br/>\n".join(formatted)
+                html_content = markdown.markdown(content, extensions=["fenced_code", "tables", "nl2br"])
+                bubble = f'''
+                <div style="margin: 8px 0; margin-right: 40px; text-align: left;">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 11px; margin: 0; padding: 0;">Scenoxis</div>
+                    {html_content}
+                </div>
+                '''
+                formatted.append(bubble)
+                
+        return "".join(formatted)
 
     def _on_agent_error(self, query: str, msg: str):
         if getattr(self, "_current_agent_query", "") != query:
             return
 
         self._results.stop_border_scan()
-        self._show_chat_result(f"⚠ Error: {msg}")
+        self._show_chat_result(text=f"⚠ Error: {msg}", html="")
         
         # Hide scanner overlay if it exists
         if hasattr(self, "_scanner_overlay") and self._scanner_overlay:
@@ -883,21 +907,18 @@ class OverlayWindow(QWidget):
         """Handle YT-specific errors (single-arg signal)."""
         print(f"[YT] error signal received: {msg}")
         self._results.stop_border_scan()
-        self._show_chat_result(f"⚠ YouTube error: {msg}")
+        self._show_chat_result(text=f"⚠ YouTube error: {msg}", html="")
         self._relayout()
 
-    def _start_yt_download(self, url: str, format_id: str):
-        # Open folder dialog for download location
+    def _on_yt_folder_change(self):
         from PySide6.QtWidgets import QFileDialog
-        import os
-        
-        default_dir = os.path.expanduser("~/Downloads")
-        out_dir = QFileDialog.getExistingDirectory(self, "Select Download Folder", default_dir)
-        if not out_dir:
-            self._results.stop_border_scan()
-            self._show_chat_result("Download cancelled.")
-            self._relayout()
-            return
+        out_dir = QFileDialog.getExistingDirectory(self, "Select Download Folder", self._results._yt_download_dir)
+        if out_dir:
+            self._results._yt_download_dir = out_dir
+
+    def _start_yt_download(self, url: str, format_id: str, out_dir: str):
+        self._results.show_download_progress_mode()
+        self._relayout()
             
         worker = YTDownloadWorker(url, format_id, out_dir)
         thread = QThread()
@@ -927,9 +948,9 @@ class OverlayWindow(QWidget):
     def _on_yt_download_finished(self, result: dict):
         if result.get("success"):
             path = result.get("filepath", "")
-            self._show_chat_result(f"✓ Download complete:\n`{path}`")
+            self._show_chat_result(text=f"✓ Download complete:\n`{path}`", show_followup=False)
         else:
-            self._show_chat_result(f"✗ Download failed: {result.get('error')}")
+            self._show_chat_result(text=f"✗ Download failed: {result.get('error')}")
         self._relayout()
 
     def _launch_exe(self, exe_path: str):

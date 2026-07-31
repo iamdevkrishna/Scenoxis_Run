@@ -75,12 +75,14 @@ def list_formats(url: str) -> list[dict]:
         fsize  = f.get("filesize") or f.get("filesize_approx")
 
         # Categorize
+        fmt_id = f.get("format_id", "?")
         if vcodec != "none" and acodec != "none":
             cat = "Video + Audio"
             note = f"{height}p{int(fps) if fps else ''} [{ext}]"
         elif vcodec != "none":
-            cat = "Video Only"
+            cat = "Video + Audio (HQ Muxed)"
             note = f"{height}p{int(fps) if fps else ''} [{ext}]"
+            fmt_id = f"{fmt_id}+bestaudio/best"
         elif acodec != "none":
             cat = "Audio Only"
             note = f"[{ext}] {int(tbr or 0)}kbps"
@@ -94,27 +96,27 @@ def list_formats(url: str) -> list[dict]:
 
         result.append({
             "category":     cat,
-            "format_id":    f.get("format_id", "?"),
+            "format_id":    fmt_id,
             "ext":          ext,
             "height":       height,
             "note":         note + size_str,
             "filesize":     fsize,
         })
 
-    # Filter to meaningful formats (video+audio preferred, then best video, then audio)
+    # Filter to meaningful formats
     va = [r for r in result if r["category"] == "Video + Audio"]
-    vo = [r for r in result if r["category"] == "Video Only"]
+    va_hq = [r for r in result if r["category"] == "Video + Audio (HQ Muxed)"]
     ao = [r for r in result if r["category"] == "Audio Only"]
 
-    # Sort each group by height descending (for audio, bitrate is sorted inherently if height is None)
+    # Sort each group by height descending
     va.sort(key=lambda x: x.get("height") or 0, reverse=True)
-    vo.sort(key=lambda x: x.get("height") or 0, reverse=True)
+    va_hq.sort(key=lambda x: x.get("height") or 0, reverse=True)
     
-    # Sort audio by bitrate or filesize if possible, since height is 0
+    # Sort audio by bitrate or filesize if possible
     ao.sort(key=lambda x: x.get("filesize") or 0, reverse=True)
 
-    # Return a curated list: top 8 V+A, top 6 V-only, top 4 A-only
-    curated = va[:8] + vo[:6] + ao[:4]
+    # Return a curated list: top 6 HQ, top 2 basic, top 4 audio
+    curated = va_hq[:6] + va[:2] + ao[:4]
     return curated if curated else result[:15]
 
 
@@ -158,14 +160,22 @@ def download(
             "merge_output_format": "mp4",
         }
 
+        try:
+            import imageio_ffmpeg
+            ydl_opts["ffmpeg_location"] = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            pass
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
         return {"success": True, "filepath": filepath_holder["path"], "error": None}
 
     except Exception as exc:
-        log.error("yt-dlp download failed: %s", exc)
-        return {"success": False, "filepath": "", "error": str(exc)}
+        import re
+        err_msg = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', str(exc))
+        log.error("yt-dlp download failed: %s", err_msg)
+        return {"success": False, "filepath": "", "error": err_msg}
 
 
 @tool

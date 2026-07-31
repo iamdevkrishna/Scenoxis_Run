@@ -292,6 +292,48 @@ class AppResultWidget(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# YT Format result row
+# ─────────────────────────────────────────────────────────────────────────────
+class YtFormatWidget(QWidget):
+    folder_clicked = Signal()
+
+    def __init__(self, item: ResultItem, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+        layout = QHBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        if item.selectable:
+            layout.setContentsMargins(14, 6, 16, 6)
+            self._folder_btn = QToolButton()
+            self._folder_btn.setText("📁")
+            self._folder_btn.setFixedSize(24, 24)
+            self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._folder_btn.setStyleSheet("""
+                QToolButton { background: transparent; border: none; color: rgba(255,255,255,180); font-size: 14px; }
+                QToolButton:hover { color: white; }
+            """)
+            self._folder_btn.setToolTip("Change Download Folder")
+            self._folder_btn.clicked.connect(lambda: self.folder_clicked.emit())
+            layout.addWidget(self._folder_btn)
+
+            self._label = QLabel(item.title)
+            self._label.setFont(QFont("Segoe UI Variable", 12))
+            self._label.setStyleSheet("color: rgba(255,255,255,230);")
+            layout.addWidget(self._label)
+            layout.addStretch()
+        else:
+            # Shift the header to align perfectly with the format text: 14 (margin) + 24 (button) + 14 (spacing) = 52
+            layout.setContentsMargins(52, 4, 16, 4)
+            self._label = QLabel(item.title)
+            self._label.setFont(QFont("Segoe UI Variable", 10, QFont.Weight.Bold))
+            self._label.setStyleSheet("color: rgba(255,255,255,100); letter-spacing: 1px;")
+            layout.addWidget(self._label)
+            layout.addStretch()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Border-scan animation overlay (page analysis) — now monochrome
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -360,9 +402,10 @@ class BorderScanOverlay(QWidget):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ResultsPanel(QWidget):
-    yt_format_selected = Signal(str, str)
+    yt_format_selected = Signal(str, str, str)  # url, format_id, folder_path
     app_selected       = Signal(str)
     followup_submitted = Signal(str)
+    yt_folder_change_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -473,7 +516,7 @@ class ResultsPanel(QWidget):
         # Border scan overlay
         self._scan = BorderScanOverlay(self)
 
-        # Download progress bar
+        # Download progress bar & label
         self._progress_bar = QProgressBar()
         self._progress_bar.setObjectName("DownloadProgress")
         self._progress_bar.setRange(0, 100)
@@ -481,9 +524,17 @@ class ResultsPanel(QWidget):
         self._progress_bar.hide()
         self._layout.addWidget(self._progress_bar)
 
+        self._download_status_label = QLabel()
+        self._download_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._download_status_label.setStyleSheet("color: rgba(255,255,255,150); font-size: 13px; padding-bottom: 4px;")
+        self._download_status_label.hide()
+        self._layout.addWidget(self._download_status_label)
+
         # State
         self._current_items: list[ResultItem] = []
         self._yt_url: str = ""
+        import os
+        self._yt_download_dir = os.path.expanduser("~/Downloads")
 
         self._list_widget.itemActivated.connect(self._on_item_activated)
         self.setVisible(False)
@@ -523,6 +574,7 @@ class ResultsPanel(QWidget):
         self._thinking.stop()
         self._current_items = items
         self._progress_bar.hide()
+        self._download_status_label.hide()
         self._scan.stop()
 
         if not items:
@@ -547,8 +599,11 @@ class ResultsPanel(QWidget):
         self._list_widget.clear()
         self._chat_pane.clear()
         self._progress_bar.hide()
+        self._download_status_label.hide()
         self._current_items = []
         self._stack.setCurrentIndex(0)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self.reset_followup()
         self.setVisible(False)
 
@@ -559,24 +614,49 @@ class ResultsPanel(QWidget):
     def stop_border_scan(self):
         self._scan.stop()
 
+    def show_download_progress_mode(self):
+        self._stack.setCurrentIndex(0)  # Hide the list
+        self._progress_bar.setValue(0)
+        self._progress_bar.show()
+        self._download_status_label.setText("Preparing download...")
+        self._download_status_label.show()
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(100)
+
     def update_download_progress(self, downloaded: int, total: int):
         self._progress_bar.show()
+        self._download_status_label.show()
+        mb_done = downloaded / 1024 / 1024
+        
         if total > 0:
+            mb_total = total / 1024 / 1024
             self._progress_bar.setValue(int(downloaded / total * 100))
+            self._download_status_label.setText(f"Downloading... {mb_done:.1f} MB / {mb_total:.1f} MB")
         else:
             self._progress_bar.setValue(0)
+            self._download_status_label.setText(f"Downloading... {mb_done:.1f} MB")
 
     def select_next(self):
-        row = self._list_widget.currentRow()
         count = self._list_widget.count()
-        if count:
-            self._list_widget.setCurrentRow((row + 1) % count)
+        if not count: return
+        row = self._list_widget.currentRow()
+        for i in range(1, count + 1):
+            next_row = (row + i) % count
+            item = self._list_widget.item(next_row)
+            if item and (item.flags() & Qt.ItemFlag.ItemIsSelectable):
+                self._list_widget.setCurrentRow(next_row)
+                break
 
     def select_prev(self):
-        row = self._list_widget.currentRow()
         count = self._list_widget.count()
-        if count:
-            self._list_widget.setCurrentRow((row - 1) % count)
+        if not count: return
+        row = self._list_widget.currentRow()
+        for i in range(1, count + 1):
+            prev_row = (row - i) % count
+            item = self._list_widget.item(prev_row)
+            if item and (item.flags() & Qt.ItemFlag.ItemIsSelectable):
+                self._list_widget.setCurrentRow(prev_row)
+                break
 
     def activate_selected(self):
         item = self._list_widget.currentItem()
@@ -592,6 +672,8 @@ class ResultsPanel(QWidget):
         for ri in items:
             litem = QListWidgetItem(self._list_widget)
             litem.setData(Qt.ItemDataRole.UserRole, ri)
+            if not ri.selectable:
+                litem.setFlags(litem.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled)
 
             if ri.kind == ResultKind.APP:
                 widget = AppResultWidget(ri)
@@ -606,8 +688,10 @@ class ResultsPanel(QWidget):
                 litem.setSizeHint(QSize(0, 44))
 
             elif ri.kind == ResultKind.YT_FORMAT:
-                litem.setText(f"  {ri.title}")
-                litem.setSizeHint(QSize(0, 36))
+                widget = YtFormatWidget(ri)
+                widget.folder_clicked.connect(self.yt_folder_change_requested.emit)
+                litem.setSizeHint(widget.sizeHint())
+                self._list_widget.setItemWidget(litem, widget)
                 self._yt_url = ri.action_data.get("url", "")
 
             else:
@@ -615,8 +699,14 @@ class ResultsPanel(QWidget):
                 litem.setSizeHint(QSize(0, 36))
 
         if self._list_widget.count() > 0:
-            self._list_widget.setCurrentRow(0)
+            for i in range(self._list_widget.count()):
+                item = self._list_widget.item(i)
+                if item.flags() & Qt.ItemFlag.ItemIsSelectable:
+                    self._list_widget.setCurrentRow(i)
+                    break
 
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self._stack.setCurrentIndex(1)
         self._adjust_list_height()
 
@@ -636,25 +726,32 @@ class ResultsPanel(QWidget):
         <style>
           body {{ color: rgba(255,255,255,0.88);
                  font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
-                 font-size: 13px; line-height: 1.6; margin: 0; padding: 0; }}
+                 font-size: 13px; line-height: 1.6; margin: 0; padding: 0;
+                 word-wrap: break-word; word-break: break-word; }}
           code {{ background: rgba(255,255,255,0.05); border-radius: 3px;
                  padding: 1px 4px; font-size: 12px;
                  font-family: 'Cascadia Code', 'Consolas', monospace; }}
           pre  {{ background: rgba(255,255,255,0.03); border-radius: 6px;
                  padding: 10px 14px; overflow-x: auto;
                  border: 1px solid rgba(255,255,255,0.05); }}
+          p    {{ background: transparent; margin: 3px 0; }}
           a    {{ color: rgba(255,255,255,0.70); text-decoration: underline; }}
           strong {{ color: rgba(255,255,255,0.95); }}
           h1,h2,h3 {{ color: rgba(255,255,255,0.92); margin: 8px 0 4px;
                       font-weight: 500; }}
           ul,ol {{ margin: 4px 0; padding-left: 18px; }}
           li   {{ margin: 1px 0; }}
-          p    {{ margin: 3px 0; }}
           blockquote {{ margin: 4px 0 12px 10px; padding-left: 12px; border-left: 3px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); font-style: italic; }}
         </style>
         {html}
         """
         self._chat_pane.setHtml(styled)
+
+        if item.action_data.get("show_followup", True):
+            self._followup_container.show()
+        else:
+            self._followup_container.hide()
+
         self._stack.setCurrentIndex(2)
         QTimer.singleShot(10, self._adjust_chat_height)
         QTimer.singleShot(20, self._scroll_chat_to_bottom)
@@ -666,8 +763,11 @@ class ResultsPanel(QWidget):
         if ri.kind == ResultKind.APP:
             self.app_selected.emit(ri.action_data.get("exe_path", ""))
         elif ri.kind == ResultKind.YT_FORMAT:
-            fmt_id = ri.action_data.get("format_id", "bestvideo+bestaudio/best")
-            self.yt_format_selected.emit(self._yt_url, fmt_id)
+            if not ri.selectable:
+                return
+            format_id = ri.action_data.get("format_id")
+            if self._yt_url and format_id:
+                self.yt_format_selected.emit(self._yt_url, format_id, self._yt_download_dir)
 
     def _adjust_list_height(self):
         count = self._list_widget.count()

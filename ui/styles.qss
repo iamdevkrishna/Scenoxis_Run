@@ -75,7 +75,7 @@ QListWidget#ResultsList::item:selected {
     color: #ffffff;
 }
 
-QListWidget#ResultsList::item:hover:!selected {
+QListWidget#ResultsList::item:hover:!selected:enabled {
     background: rgba(255, 255, 255, 0.04);
 }
 
