@@ -44,6 +44,7 @@ def list_formats(url: str) -> list[dict]:
         "extract_flat": False,
         "nocheckcertificate": True,
         "no_check_certificates": True,
+        "noplaylist": True,
     }
     print(f"[YT] list_formats() called for: {url}")
     print(f"[YT] Calling yt_dlp.extract_info (this may take a moment)...")
@@ -158,6 +159,7 @@ def download(
             "no_warnings": True,
             "progress_hooks": [_hook],
             "merge_output_format": "mp4",
+            "noplaylist": True,
         }
 
         try:

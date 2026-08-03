@@ -16,6 +16,7 @@ class ResultKind(Enum):
     PAGE       = auto()   # Page analysis answer
     THINKING   = auto()   # Placeholder while LLM is processing
     ERROR      = auto()   # Error message
+    BOOKMARK   = auto()   # Saved bookmark/watch later link
 
 
 @dataclass

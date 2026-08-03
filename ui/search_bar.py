@@ -23,6 +23,7 @@ class SearchBar(QLineEdit):
     escape_pressed = Signal()
     enter_pressed  = Signal()
     tab_pressed    = Signal()
+    delete_pressed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,5 +55,8 @@ class SearchBar(QLineEdit):
             return
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.enter_pressed.emit()
+            return
+        if key == Qt.Key.Key_Delete:
+            self.delete_pressed.emit()
             return
         super().keyPressEvent(event)

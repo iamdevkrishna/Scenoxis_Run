@@ -315,6 +315,8 @@ class OverlayWindow(QWidget):
         self._results.followup_submitted.connect(self._on_followup)
         self._results.yt_folder_change_requested.connect(self._on_yt_folder_change)
         self._results.chat_height_changed.connect(self._relayout)
+        self._results.bookmark_selected.connect(self._launch_bookmark)
+        self._search.delete_pressed.connect(self._on_delete_pressed)
 
     # ─────────────────────────────────────────────────────────────────────
     # Show / hide with animations
@@ -327,6 +329,10 @@ class OverlayWindow(QWidget):
         self._apply_acrylic()
         self._is_animating = True
         self._hiding = False
+
+        # Grab the active browser URL for context before we steal focus!
+        import core.browser_tracker as bt
+        self._active_tab_url = bt.get_active_browser_url()
 
         # Start 12px above target, slide down
         target = self.pos()
@@ -434,6 +440,16 @@ class OverlayWindow(QWidget):
         super().resizeEvent(event)
         self.update()
 
+    def event(self, event):
+        """Auto-hide the overlay when it loses focus (like Spotlight/PowerToys)."""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.Type.WindowDeactivate:
+            # Only hide if we aren't currently popping up an alert or dialog.
+            # In our case, the app has no dialogs, so it's safe to always hide.
+            self.hide_overlay()
+        return super().event(event)
+
+
     # ─────────────────────────────────────────────────────────────────────
     # Painting — rounded corners clip
     # ─────────────────────────────────────────────────────────────────────
@@ -518,6 +534,12 @@ class OverlayWindow(QWidget):
                 self._debounce.stop()
                 return
 
+        if preview_intent == "view_bookmarks":
+            self._show_bookmarks()
+            self._set_badge("SAVED")
+            self._debounce.stop()
+            return
+
         # If we got here, it is NOT an instant app launch or math calc.
         # Clear any stale app results from when the query was shorter!
         self._results.clear()
@@ -570,6 +592,14 @@ class OverlayWindow(QWidget):
             self._run_yt_list(query)
             return
 
+        if intent == "save_bookmark":
+            self._save_bookmark(query)
+            return
+            
+        if intent == "view_bookmarks":
+            self._show_bookmarks()
+            return
+
         # Chat — show thinking then run agent on background thread
         self._results.show_thinking()
         self._results.start_border_scan()
@@ -597,6 +627,63 @@ class OverlayWindow(QWidget):
         self._divider.show()
         self._results.show_results(items)
         self._relayout()
+
+    def _show_bookmarks(self):
+        import core.bookmarks as bm
+        bookmarks = bm.get_bookmarks()
+        if not bookmarks:
+            self._show_chat_result(text="No saved links found. Type `save` to bookmark your current tab.")
+            return
+
+        items = []
+        for b in bookmarks:
+            ri = ResultItem(
+                kind=ResultKind.BOOKMARK,
+                title=b.get("title", b.get("url")),
+                subtitle=b.get("url"),
+                action_data={"url": b.get("url")},
+                score=0,
+            )
+            items.append(ri)
+        self._divider.show()
+        self._results.show_results(items)
+        self._relayout()
+
+    def _save_bookmark(self, query: str):
+        # Allow pasting the url manually: e.g. "save https://youtube.com/..."
+        url = None
+        parts = query.split(maxsplit=1)
+        if len(parts) > 1 and (parts[1].startswith("http") or "://" in parts[1]):
+            url = parts[1].strip()
+            
+        # Fallback to the active tab if they didn't paste a URL
+        if not url:
+            url = self._active_tab_url
+            
+        if not url:
+            self._show_chat_result(text="Could not detect an active browser tab to save. Try copying the link and typing `save <url>`.")
+            return
+            
+        import core.bookmarks as bm
+        bm.save_bookmark(url)
+        self._show_chat_result(text=f"✓ Saved to watch later:\n`{url}`")
+        self._set_badge("SAVED")
+
+    def _launch_bookmark(self, url: str):
+        if not url:
+            return
+        import webbrowser
+        webbrowser.open(url)
+        self.hide_overlay()
+
+    def _on_delete_pressed(self):
+        item = self._results.get_selected_item()
+        if item and item.kind == ResultKind.BOOKMARK:
+            url = item.action_data.get("url")
+            if url:
+                import core.bookmarks as bm
+                bm.remove_bookmark(url)
+                self._show_bookmarks()
 
     def _show_calc_result(self, expression: str, result: str):
         ri = ResultItem(

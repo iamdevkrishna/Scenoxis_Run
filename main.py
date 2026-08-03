@@ -38,6 +38,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFontDatabase, QFont
 
+
 # Enable High-DPI scaling before creating QApplication
 QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

@@ -25,6 +25,10 @@ _PAGE_PHRASES = re.compile(
     re.IGNORECASE,
 )
 
+# ── Bookmarks ───────────────────────────────────────────────────────────────
+_SAVE_BOOKMARK_RE = re.compile(r"^(?:save|watch later|bookmark)\b", re.IGNORECASE)
+_VIEW_BOOKMARKS_RE = re.compile(r"^(?:saved|bookmarks)$", re.IGNORECASE)
+
 # ── Natural-language question patterns (should NEVER route to app_launch) ──
 _QUESTION_RE = re.compile(
     r"^\s*(?:who|what|how|why|when|where|which|is|are|was|were|do|does|did|"
@@ -68,12 +72,22 @@ def classify(query: str, app_index=None) -> str:
         log.debug("classify → calc")
         return "calc"
 
-    # 2. YouTube URL
+    # 2. View Bookmarks (Highest priority for these keywords)
+    if _VIEW_BOOKMARKS_RE.match(q):
+        log.debug("classify → view_bookmarks")
+        return "view_bookmarks"
+        
+    # 3. Save Bookmark
+    if _SAVE_BOOKMARK_RE.match(q):
+        log.debug("classify → save_bookmark")
+        return "save_bookmark"
+
+    # 4. YouTube URL
     if _YT_PATTERN.search(q):
         log.debug("classify → yt_download")
         return "yt_download"
 
-    # 3. Page analysis
+    # 5. Page analysis
     if _PAGE_PHRASES.search(q):
         log.debug("classify → page_analyze")
         return "page_analyze"
@@ -101,7 +115,7 @@ def classify_for_live_preview(query: str, app_index=None) -> Optional[str]:
     instant local results. Returns None for everything else (no preview yet).
     """
     intent = classify(query, app_index)
-    if intent in ("calc", "app_launch"):
+    if intent in ("calc", "app_launch", "view_bookmarks"):
         return intent
     return None
 

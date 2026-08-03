@@ -407,6 +407,7 @@ class ResultsPanel(QWidget):
     followup_submitted = Signal(str)
     yt_folder_change_requested = Signal()
     chat_height_changed = Signal()
+    bookmark_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -771,6 +772,14 @@ class ResultsPanel(QWidget):
             format_id = ri.action_data.get("format_id")
             if self._yt_url and format_id:
                 self.yt_format_selected.emit(self._yt_url, format_id, self._yt_download_dir)
+        elif ri.kind == ResultKind.BOOKMARK:
+            self.bookmark_selected.emit(ri.action_data.get("url", ""))
+
+    def get_selected_item(self) -> Optional[ResultItem]:
+        row = self._list_widget.currentRow()
+        if row < 0 or row >= len(self._current_items):
+            return None
+        return self._current_items[row]
 
     def _adjust_list_height(self):
         count = self._list_widget.count()
