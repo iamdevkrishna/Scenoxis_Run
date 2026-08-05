@@ -118,7 +118,8 @@ def _call_groq_vision(image_bytes: bytes, prompt: str) -> str:
     """Send image to Groq vision model and return the text response."""
     try:
         from groq import Groq
-        api_key = os.environ.get("GROQ_API_KEY", "")
+        from core.config import get_api_key
+        api_key = get_api_key("GROQ")
         if not api_key:
             return "GROQ_API_KEY not set."
 

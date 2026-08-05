@@ -19,9 +19,10 @@ def web_search(query: str) -> str:
     that needs verification from live sources.
     Returns a formatted summary of the top search results.
     """
-    api_key = os.environ.get("TAVILY_API_KEY", "")
+    from core.config import get_api_key
+    api_key = get_api_key("TAVILY")
     if not api_key:
-        return "Tavily API key not configured. Set TAVILY_API_KEY in .env."
+        return "Tavily API key not configured. Please add it in Settings."
 
     # Try normal SSL first, then retry with verification disabled
     # (handles corporate proxies / VPNs that inject self-signed certs)

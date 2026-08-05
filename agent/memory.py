@@ -247,7 +247,8 @@ def should_store_as_memory(user_msg: str, assistant_response: str) -> bool:
                     user_msg=user_msg, assistant_response=assistant_response
                 )
 
-        client = Groq(api_key=os.environ.get("GROQ_API_KEY", ""))
+        from core.config import get_api_key
+        client = Groq(api_key=get_api_key("GROQ"))
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": decision_prompt}],

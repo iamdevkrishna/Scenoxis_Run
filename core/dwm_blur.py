@@ -67,7 +67,7 @@ def _get_set_wca():
     return _set_wca
 
 
-def apply_blur(hwnd: int, tint_color: int = 0x01000000) -> bool:
+def apply_blur(hwnd: int, dark_mode: bool = True, tint_color: int = 0x01000000) -> bool:
     """
     Apply Windows 10/11 Acrylic blur to the given HWND.
 
@@ -83,7 +83,7 @@ def apply_blur(hwnd: int, tint_color: int = 0x01000000) -> bool:
     # ── Enable dark mode ──────────────────────────────────────────────────
     try:
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-        dark = ctypes.c_int(1)
+        dark = ctypes.c_int(1 if dark_mode else 0)
         dwmapi.DwmSetWindowAttribute(
             ctypes.wintypes.HWND(hwnd),
             ctypes.wintypes.DWORD(DWMWA_USE_IMMERSIVE_DARK_MODE),

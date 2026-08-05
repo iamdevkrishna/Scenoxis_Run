@@ -34,9 +34,9 @@ logging.basicConfig(
 log = logging.getLogger("scenoxis")
 
 # ── Qt ───────────────────────────────────────────────────────────────────────
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFontDatabase, QFont
+from PySide6.QtGui import QFontDatabase, QFont, QAction, QIcon
 
 
 # Enable High-DPI scaling before creating QApplication
@@ -110,6 +110,42 @@ def main() -> int:
         log.error("Failed to register Alt+Space hotkey")
     else:
         log.info("Alt+Space hotkey registered — press to open Scenoxis Run")
+
+    # ── System Tray ───────────────────────────────────────────────────────
+    tray_icon = QSystemTrayIcon(app)
+    icon = QIcon("assets/icon.png")
+    if not icon.isNull():
+        tray_icon.setIcon(icon)
+    
+    tray_menu = QMenu()
+    
+    settings_action = QAction("Settings", app)
+    def _open_settings():
+        from ui.settings_window import SettingsWindow
+        s = SettingsWindow()
+        s.exec()
+        # Reload theme after settings close
+        window._apply_stylesheet()
+        window._apply_acrylic()
+    settings_action.triggered.connect(_open_settings)
+    tray_menu.addAction(settings_action)
+    
+    features_action = QAction("Features", app)
+    def _open_features():
+        from ui.features_window import FeaturesWindow
+        f = FeaturesWindow()
+        f.exec()
+    features_action.triggered.connect(_open_features)
+    tray_menu.addAction(features_action)
+    
+    tray_menu.addSeparator()
+    
+    quit_action = QAction("Quit", app)
+    quit_action.triggered.connect(app.quit)
+    tray_menu.addAction(quit_action)
+    
+    tray_icon.setContextMenu(tray_menu)
+    tray_icon.show()
 
     # ── Optional: show window once on first launch ────────────────────────
     def _check_ready_and_show():

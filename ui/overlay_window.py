@@ -158,18 +158,21 @@ class _MonoSearchIcon(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
 
     def paintEvent(self, event):
+        from core.config import is_dark_mode
+        dark = is_dark_mode()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Circle (lens)
-        pen = QPen(QColor(255, 255, 255, 90), 1.5)
+        color = QColor(255, 255, 255, 90) if dark else QColor(0, 0, 0, 90)
+        pen = QPen(color, 1.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(4, 3, 11, 11)
 
         # Handle (diagonal line)
-        p.setPen(QPen(QColor(255, 255, 255, 90), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setPen(QPen(color, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawLine(13, 13, 17, 17)
 
         p.end()
@@ -281,10 +284,15 @@ class OverlayWindow(QWidget):
 
     def _apply_stylesheet(self):
         import os
+        from core.config import is_dark_mode
         qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+                qss = f.read()
+                if not is_dark_mode():
+                    qss = qss.replace("255, 255, 255", "0, 0, 0")
+                    qss = qss.replace("rgba(255,255,255", "rgba(0,0,0")
+                self.setStyleSheet(qss)
         except FileNotFoundError:
             log.warning("styles.qss not found")
 
@@ -430,10 +438,11 @@ class OverlayWindow(QWidget):
 
     def _apply_acrylic(self):
         try:
+            from core.config import is_dark_mode
             hwnd = int(self.winId())
             # Tint nearly transparent — let DWM just blur, we paint our own
             # dark background inside the rounded clip path in paintEvent
-            dwm_blur.apply_blur(hwnd, tint_color=0x01000000)
+            dwm_blur.apply_blur(hwnd, dark_mode=is_dark_mode(), tint_color=0x01000000)
         except Exception as exc:
             log.debug("_apply_acrylic failed: %s", exc)
 
