@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QTextBrowser,
     QProgressBar, QFrame, QSizePolicy, QScrollArea,
-    QStackedWidget, QAbstractItemView, QToolButton, QLineEdit, QSpacerItem
+    QStackedWidget, QAbstractItemView, QToolButton, QLineEdit, QSpacerItem,
+    QPushButton
 )
 
 from ui.result_item import ResultItem, ResultKind
@@ -292,6 +293,66 @@ class AppResultWidget(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Convert Result row
+# ─────────────────────────────────────────────────────────────────────────────
+class ConvertResultWidget(QWidget):
+    choose_clicked = Signal()
+
+    def __init__(self, item: ResultItem, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(50)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 12, 0)
+        layout.setSpacing(10)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Text column
+        text_col = QVBoxLayout()
+        text_col.setSpacing(0)
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self._name_label = QLabel(item.title)
+        self._name_label.setFont(QFont("Segoe UI Variable", 12))
+        self._name_label.setStyleSheet("color: rgba(255,255,255,0.92);")
+
+        self._sub_label = QLabel(item.subtitle)
+        self._sub_label.setFont(QFont("Segoe UI Variable", 9))
+        self._sub_label.setStyleSheet("color: rgba(255,255,255,0.4);")
+
+        text_col.addWidget(self._name_label)
+        text_col.addWidget(self._sub_label)
+        layout.addLayout(text_col)
+        layout.addStretch()
+
+        # Button
+        self._btn = QPushButton("Choose File")
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 4px;
+                color: rgba(255, 255, 255, 0.9);
+                padding: 4px 12px;
+                font-family: 'Segoe UI Variable';
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.15);
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.05);
+            }
+        """)
+        self._btn.clicked.connect(self.choose_clicked.emit)
+        layout.addWidget(self._btn)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # YT Format result row
 # ─────────────────────────────────────────────────────────────────────────────
 class YtFormatWidget(QWidget):
@@ -404,10 +465,16 @@ class BorderScanOverlay(QWidget):
 class ResultsPanel(QWidget):
     yt_format_selected = Signal(str, str, str)  # url, format_id, folder_path
     app_selected       = Signal(str)
+    action_selected    = Signal(str)
+    file_selected      = Signal(str)
     followup_submitted = Signal(str)
     yt_folder_change_requested = Signal()
     chat_height_changed = Signal()
     bookmark_selected = Signal(str)
+    image_convert_selected = Signal(str, str)
+    image_resize_selected = Signal(int, int)
+    file_selected = Signal(str)
+    note_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -682,12 +749,20 @@ class ResultsPanel(QWidget):
                 litem.setSizeHint(widget.sizeHint())
                 self._list_widget.setItemWidget(litem, widget)
 
-            elif ri.kind == ResultKind.CALC:
+            elif ri.kind in (ResultKind.CALC, ResultKind.CONVERT):
                 litem.setText(f"  = {ri.title}")
+                if ri.raw_text:
+                    litem.setToolTip(ri.raw_text)
                 font = QFont("Segoe UI Variable Display", 20, QFont.Weight.Thin)
                 litem.setFont(font)
                 litem.setForeground(QColor(255, 255, 255, 200))
                 litem.setSizeHint(QSize(0, 44))
+
+            elif ri.kind in (ResultKind.FILE, ResultKind.ACTION, ResultKind.NOTE):
+                # Use AppResultWidget to render files, actions, and notes cleanly
+                widget = AppResultWidget(ri)
+                litem.setSizeHint(widget.sizeHint())
+                self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind == ResultKind.YT_FORMAT:
                 widget = YtFormatWidget(ri)
@@ -695,6 +770,19 @@ class ResultsPanel(QWidget):
                 litem.setSizeHint(widget.sizeHint())
                 self._list_widget.setItemWidget(litem, widget)
                 self._yt_url = ri.action_data.get("url", "")
+
+            elif ri.kind == ResultKind.IMAGE_CONVERT:
+                widget = ConvertResultWidget(ri)
+                # When the button is clicked, we trigger the activation on the list item manually
+                widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
+                litem.setSizeHint(QSize(0, 50))
+                self._list_widget.setItemWidget(litem, widget)
+
+            elif ri.kind == ResultKind.IMAGE_RESIZE:
+                widget = ConvertResultWidget(ri)
+                widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
+                litem.setSizeHint(QSize(0, 50))
+                self._list_widget.setItemWidget(litem, widget)
 
             else:
                 litem.setText(f"  {ri.title}")
@@ -774,6 +862,38 @@ class ResultsPanel(QWidget):
                 self.yt_format_selected.emit(self._yt_url, format_id, self._yt_download_dir)
         elif ri.kind == ResultKind.BOOKMARK:
             self.bookmark_selected.emit(ri.action_data.get("url", ""))
+        elif ri.kind == ResultKind.IMAGE_CONVERT:
+            self.image_convert_selected.emit(
+                ri.action_data.get("source_format", ""),
+                ri.action_data.get("target_format", "")
+            )
+        elif ri.kind == ResultKind.IMAGE_RESIZE:
+            self.image_resize_selected.emit(
+                ri.action_data.get("width", 0),
+                ri.action_data.get("height", 0)
+            )
+        elif ri.kind == ResultKind.ACTION:
+            self.action_selected.emit(ri.action_data.get("action", ""))
+        elif ri.kind == ResultKind.FILE:
+            self.file_selected.emit(ri.action_data.get("path", ""))
+
+    def _on_item_activated_by_data(self, ri: ResultItem):
+        if not ri:
+            return
+        if ri.kind == ResultKind.IMAGE_CONVERT:
+            self.image_convert_selected.emit(
+                ri.action_data.get("source_format", ""),
+                ri.action_data.get("target_format", "")
+            )
+        elif ri.kind == ResultKind.IMAGE_RESIZE:
+            self.image_resize_selected.emit(
+                ri.action_data.get("width", 0),
+                ri.action_data.get("height", 0)
+            )
+        elif ri.kind == ResultKind.ACTION:
+            self.action_selected.emit(ri.action_data.get("action", ""))
+        elif ri.kind == ResultKind.FILE:
+            self.file_selected.emit(ri.action_data.get("path", ""))
 
     def get_selected_item(self) -> Optional[ResultItem]:
         row = self._list_widget.currentRow()

@@ -58,14 +58,16 @@ def _load_prompt(filename: str) -> dict:
         return {}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LLM client (shared, lazy)
-# ─────────────────────────────────────────────────────────────────────────────
+from agent.tools.web_search import web_search
+from agent.tools.ui_actions import trigger_image_convert, trigger_image_resize, trigger_yt_download
+
+log = logging.getLogger(__name__)
+
+# List of tools we want to give to the main Chat agent
+_CHAT_TOOLS = [web_search, trigger_image_convert, trigger_image_resize, trigger_yt_download]
 
 _llm: ChatGroq | None = None
 _llm_with_tools: Any  = None
-
-_CHAT_TOOLS = [web_search]
 
 
 def _get_llm() -> ChatGroq:
@@ -212,6 +214,22 @@ def node_groq_chat(state: AgentState) -> AgentState:
         tool_args = tool_call["args"]
 
         log.info("Tool call: %s(%s)", tool_name, tool_args)
+        
+        if tool_name in ("trigger_image_convert", "trigger_image_resize", "trigger_yt_download"):
+            try:
+                import json
+                tool = next(t for t in _CHAT_TOOLS if t.name == tool_name)
+                res_str = tool.invoke(tool_args)
+                ui_data = json.loads(res_str)
+                return {
+                    **state,
+                    "tool_output": ui_data,
+                    "result": "TRIGGER_UI_ACTION",
+                    "messages": messages,
+                    "is_thinking": False
+                }
+            except Exception as exc:
+                log.error("Failed to trigger ui action: %s", exc)
 
         tool_result = ""
         search_results = []
@@ -256,6 +274,9 @@ def node_groq_chat(state: AgentState) -> AgentState:
         "messages":    messages,
         "is_thinking": False,
     }
+
+
+
 
 
 def node_maybe_write_memory(state: AgentState) -> AgentState:

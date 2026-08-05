@@ -17,6 +17,12 @@ class ResultKind(Enum):
     THINKING   = auto()   # Placeholder while LLM is processing
     ERROR      = auto()   # Error message
     BOOKMARK   = auto()   # Saved bookmark/watch later link
+    IMAGE_CONVERT = auto() # Image conversion action
+    IMAGE_RESIZE = auto()  # Image resize action
+    ACTION     = auto()   # Generic execute action (system, media)
+    FILE       = auto()   # File search result
+    CONVERT    = auto()   # Unit/Currency conversion result
+    NOTE       = auto()   # Saved note
 
 
 @dataclass

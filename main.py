@@ -97,6 +97,10 @@ def main() -> int:
     mem_thread = threading.Thread(target=_warm_memory_model, daemon=True, name="MemoryWarmup")
     mem_thread.start()
 
+    # ── Init Currency Converter (background thread) ───────────────────────
+    from core.converter import init_converter
+    init_converter()
+
     # ── Global hotkey ─────────────────────────────────────────────────────
     # The hotkey callback is called on the Win32 pump thread; it emits
     # window.toggle_visibility (a Qt signal) which is delivered safely
@@ -130,3 +134,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

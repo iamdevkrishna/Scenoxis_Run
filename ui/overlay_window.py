@@ -221,6 +221,7 @@ class OverlayWindow(QWidget):
         self.setWindowTitle("Scenoxis Run")
         self.setObjectName("ScenoxisOverlay")
         self.setWindowOpacity(0.0)   # start invisible for fade-in
+        self._dialog_open = False    # flag to prevent auto-hide when a dialog is open
 
     def _load_fonts(self):
         # We use standard system fonts (Segoe UI on Windows)
@@ -311,11 +312,15 @@ class OverlayWindow(QWidget):
         self._search.arrow_down.connect(self._results.select_next)
 
         self._results.app_selected.connect(self._launch_exe)
+        self._results.action_selected.connect(self._run_sys_control)
+        self._results.file_selected.connect(self._launch_file)
         self._results.yt_format_selected.connect(self._start_yt_download)
         self._results.followup_submitted.connect(self._on_followup)
         self._results.yt_folder_change_requested.connect(self._on_yt_folder_change)
         self._results.chat_height_changed.connect(self._relayout)
         self._results.bookmark_selected.connect(self._launch_bookmark)
+        self._results.image_convert_selected.connect(self._start_image_convert)
+        self._results.image_resize_selected.connect(self._start_image_resize)
         self._search.delete_pressed.connect(self._on_delete_pressed)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -441,12 +446,6 @@ class OverlayWindow(QWidget):
         self.update()
 
     def event(self, event):
-        """Auto-hide the overlay when it loses focus (like Spotlight/PowerToys)."""
-        from PySide6.QtCore import QEvent
-        if event.type() == QEvent.Type.WindowDeactivate:
-            # Only hide if we aren't currently popping up an alert or dialog.
-            # In our case, the app has no dialogs, so it's safe to always hide.
-            self.hide_overlay()
         return super().event(event)
 
 
@@ -539,6 +538,40 @@ class OverlayWindow(QWidget):
             self._set_badge("SAVED")
             self._debounce.stop()
             return
+            
+        if preview_intent == "view_notes":
+            self._show_notes()
+            self._set_badge("NOTES")
+            self._debounce.stop()
+            return
+            
+        if preview_intent in ("sys_control", "media_control"):
+            self._show_sys_control_preview(text, preview_intent)
+            self._set_badge("SYSTEM" if preview_intent == "sys_control" else "MEDIA")
+            self._debounce.stop()
+            return
+            
+        if preview_intent == "convert":
+            self._show_convert_preview(text)
+            self._set_badge("CONVERT")
+            self._debounce.stop()
+            return
+            
+        if preview_intent == "image_convert":
+            self._run_image_convert_from_query(text)
+            self._debounce.stop()
+            return
+            
+        if preview_intent == "image_resize":
+            self._run_image_resize_from_query(text)
+            self._debounce.stop()
+            return
+            
+        if preview_intent == "file_search":
+            self._show_file_search_preview(text)
+            self._set_badge("FILE SEARCH")
+            self._debounce.stop()
+            return
 
         # If we got here, it is NOT an instant app launch or math calc.
         # Clear any stale app results from when the query was shorter!
@@ -552,10 +585,10 @@ class OverlayWindow(QWidget):
         if not text:
             return
 
-        # If a selectable list result is showing (apps / yt formats), activate it
+        # If a selectable list result is showing (apps / yt formats / bookmarks), activate it
         current_items = self._results._current_items
         if current_items and current_items[0].kind in (
-            ResultKind.APP, ResultKind.YT_FORMAT
+            ResultKind.APP, ResultKind.YT_FORMAT, ResultKind.BOOKMARK
         ):
             self._results.activate_selected()
             return
@@ -577,12 +610,19 @@ class OverlayWindow(QWidget):
         query = self._search.text().strip()
         if not query:
             return
-        self._dispatch_agent_with_query(query)
 
-    def _dispatch_agent_with_query(self, query: str):
-        self._current_agent_query = query
+        # 1. Quick local classification
         from agent.classifier import classify
-        intent = classify(query, app_idx.get_index())
+        intent = classify(query, app_index=app_idx.get_index(), active_tab_url=self._active_tab_url)
+        log.info("Query '%s' classified as %s", query, intent)
+        
+        self._dispatch_agent_with_query(query, intent)
+
+    def _dispatch_agent_with_query(self, query: str, intent=None):
+        self._current_agent_query = query
+        if not intent:
+            from agent.classifier import classify
+            intent = classify(query, app_idx.get_index(), self._active_tab_url)
 
         if intent == "page_analyze":
             self._run_page_analysis(query)
@@ -598,6 +638,39 @@ class OverlayWindow(QWidget):
             
         if intent == "view_bookmarks":
             self._show_bookmarks()
+            return
+            
+        if intent == "view_notes":
+            self._show_notes()
+            return
+            
+        if intent == "image_convert":
+            self._run_image_convert_from_query(query)
+            return
+
+        if intent == "image_resize":
+            self._run_image_resize_from_query(query)
+            return
+
+        if intent == "sys_control":
+            self._run_sys_control(query)
+            return
+
+        if intent == "media_control":
+            self._run_sys_control(query)
+            return
+
+        if intent == "file_search":
+            self._run_file_search(query)
+            return
+
+        if intent == "reminder":
+            self._run_reminder(query)
+            return
+
+        if intent == "convert":
+            # Just let it execute as a preview calculation (it's handled by live preview)
+            # If they hit enter, we do nothing or clear.
             return
 
         # Chat — show thinking then run agent on background thread
@@ -649,6 +722,163 @@ class OverlayWindow(QWidget):
         self._results.show_results(items)
         self._relayout()
 
+    def _show_notes(self):
+        import core.notes as notes
+        import datetime
+        n = notes.get_notes()
+        if not n:
+            self._show_chat_result(text="No saved notes found. Type `note: <your note>` to save one.")
+            return
+
+        items = []
+        for note_dict in reversed(n):
+            if isinstance(note_dict, str):
+                text = note_dict
+                subtitle = "Old Note"
+                note_id = ""
+            else:
+                text = note_dict.get("text", "")
+                ts = note_dict.get("timestamp", 0)
+                dt = datetime.datetime.fromtimestamp(ts)
+                subtitle = f"{dt.strftime('%A, %b %d %I:%M %p')}  •  Press Delete to delete"
+                note_id = note_dict.get("id", "")
+                
+            ri = ResultItem(
+                kind=ResultKind.NOTE,
+                title=text,
+                subtitle=subtitle,
+                action_data={"id": note_id},
+                score=0,
+                selectable=True
+            )
+            items.append(ri)
+        self._divider.show()
+        self._results.show_results(items)
+        self._relayout()
+
+    def _delete_note(self, note_id: str):
+        if not note_id:
+            return
+        import core.notes as notes
+        if notes.delete_note(note_id):
+            self._show_notes()
+
+    def _run_image_convert_from_query(self, query: str):
+        from agent.classifier import _CONVERT_RE
+        m = _CONVERT_RE.match(query)
+        if not m:
+            return
+        self._run_image_convert_explicit(m.group(1), m.group(2))
+
+    def _run_image_convert_explicit(self, src: str, tgt: str):
+        ri = ResultItem(
+            kind=ResultKind.IMAGE_CONVERT,
+            title=f"Convert {src.upper()} to {tgt.upper()}",
+            subtitle="Press Enter to select file...",
+            action_data={"source_format": src, "target_format": tgt},
+        )
+        self._set_badge("CONVERT")
+        self._divider.show()
+        self._results.show_results([ri])
+        self._relayout()
+
+    def _run_image_resize_from_query(self, query: str):
+        from agent.classifier import _RESIZE_RE
+        m = _RESIZE_RE.match(query)
+        if not m:
+            return
+        self._run_image_resize_explicit(int(m.group(1)), int(m.group(2)))
+
+    def _run_image_resize_explicit(self, width: int, height: int):
+        ri = ResultItem(
+            kind=ResultKind.IMAGE_RESIZE,
+            title=f"Resize to {width}x{height}",
+            subtitle="Press Enter to select image...",
+            action_data={"width": width, "height": height},
+        )
+        self._set_badge("RESIZE")
+        self._divider.show()
+        self._results.show_results([ri])
+        self._relayout()
+
+    def _start_image_convert(self, src: str, tgt: str):
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        from core.converter import convert_image
+        
+        self._dialog_open = True
+        
+        try:
+            # Get input file
+            src_filter = f"{src.upper()} Image (*.{src.lower()})"
+            src_path, _ = QFileDialog.getOpenFileName(
+                self, f"Select {src.upper()} Image", "", src_filter
+            )
+            if not src_path:
+                return
+                
+            # Get output file
+            default_out = os.path.splitext(src_path)[0] + "." + tgt.lower()
+            tgt_filter = f"{tgt.upper()} Image (*.{tgt.lower()})"
+            tgt_path, _ = QFileDialog.getSaveFileName(
+                self, f"Save As {tgt.upper()}", default_out, tgt_filter
+            )
+            if not tgt_path:
+                return
+                
+            # Convert
+            success, final_path = convert_image(src_path, tgt_path, tgt)
+            
+            if success:
+                self._search.setText("")
+                msg_html = f"Successfully converted image to <strong>{tgt.upper()}</strong>!<br><br>Saved to: <a href='file:///{final_path.replace(' ', '%20')}'>{final_path}</a>"
+                self._show_chat_result(html=msg_html)
+            else:
+                msg_html = f"Failed to convert image to <strong>{tgt.upper()}</strong>.<br><br>Make sure the input file is a valid image format supported by Pillow."
+                self._show_chat_result(html=msg_html)
+                
+        finally:
+            self._dialog_open = False
+
+    def _start_image_resize(self, width: int, height: int):
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        from core.converter import resize_image
+        
+        self._dialog_open = True
+        
+        try:
+            # Get input file
+            src_filter = "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+            src_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Image to Resize", "", src_filter
+            )
+            if not src_path:
+                return
+                
+            # Get output file
+            default_out = os.path.splitext(src_path)[0] + f"_{width}x{height}" + os.path.splitext(src_path)[1]
+            tgt_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Resized Image", default_out, src_filter
+            )
+            if not tgt_path:
+                return
+                
+            # Convert
+            success = resize_image(src_path, tgt_path, width, height)
+            
+            if success:
+                self._search.setText("")
+                msg_html = f"Successfully resized image to <strong>{width}x{height}</strong>!<br><br>Saved to: <a href='file:///{tgt_path.replace(' ', '%20')}'>{tgt_path}</a>"
+                self._show_chat_result(html=msg_html)
+            else:
+                msg_html = f"Failed to resize image to <strong>{width}x{height}</strong>."
+                self._show_chat_result(html=msg_html)
+                
+        finally:
+            self._dialog_open = False
+
+
     def _save_bookmark(self, query: str):
         # Allow pasting the url manually: e.g. "save https://youtube.com/..."
         url = None
@@ -678,22 +908,101 @@ class OverlayWindow(QWidget):
 
     def _on_delete_pressed(self):
         item = self._results.get_selected_item()
-        if item and item.kind == ResultKind.BOOKMARK:
+        if not item:
+            return
+        if item.kind == ResultKind.BOOKMARK:
             url = item.action_data.get("url")
             if url:
                 import core.bookmarks as bm
                 bm.remove_bookmark(url)
                 self._show_bookmarks()
+        elif item.kind == ResultKind.NOTE:
+            note_id = item.action_data.get("id")
+            if note_id:
+                self._delete_note(note_id)
 
-    def _show_calc_result(self, expression: str, result: str):
-        ri = ResultItem(
-            kind=ResultKind.CALC,
-            title=result,
-            subtitle=expression,
-        )
-        self._divider.show()
+    def _show_calc_result(self, expr: str, res: str):
+        ri = ResultItem(kind=ResultKind.CALC, title=res, raw_text=expr)
         self._results.show_results([ri])
-        self._relayout()
+
+    def _show_sys_control_preview(self, query: str, intent: str):
+        action_name = query.title()
+        desc = "Press Enter to execute this command."
+        ri = ResultItem(kind=ResultKind.ACTION, title=f"Execute: {action_name}", raw_text=desc, action_data={"action": query})
+        self._results.show_results([ri])
+
+    def _show_convert_preview(self, query: str):
+        import re
+        from core.converter import convert
+        # Try to parse "amount source to target"
+        match = re.match(r"^([\d.,]+)\s+([a-zA-Z]+)\s+to\s+([a-zA-Z]+)", query, re.IGNORECASE)
+        if match:
+            amount = float(match.group(1).replace(",", ""))
+            source = match.group(2)
+            target = match.group(3)
+            res = convert(amount, source, target)
+            if res:
+                ri = ResultItem(kind=ResultKind.CONVERT, title=res, raw_text=f"{amount} {source} = {res}")
+                self._results.show_results([ri])
+                return
+        
+        # Or parse "convert amount source to target"
+        match = re.match(r"^convert\s+([\d.,]+)\s+([a-zA-Z]+)\s+(?:to|into)\s+([a-zA-Z]+)", query, re.IGNORECASE)
+        if match:
+            amount = float(match.group(1).replace(",", ""))
+            source = match.group(2)
+            target = match.group(3)
+            res = convert(amount, source, target)
+            if res:
+                ri = ResultItem(kind=ResultKind.CONVERT, title=res, raw_text=f"{amount} {source} = {res}")
+                self._results.show_results([ri])
+                return
+                
+        self._results.clear()
+
+    def _show_file_search_preview(self, query: str):
+        from core.file_search import search_files
+        search_term = query.lower().replace("find ", "").replace("search ", "").strip()
+        if len(search_term) < 2:
+            self._results.clear()
+            return
+            
+        files = search_files(search_term, limit=6)
+        items = []
+        for f in files:
+            import os
+            name = os.path.basename(f)
+            items.append(ResultItem(kind=ResultKind.FILE, title=name, raw_text=f, action_data={"path": f}))
+            
+        if items:
+            self._results.show_results(items)
+        else:
+            self._results.clear()
+
+    def _run_sys_control(self, query: str):
+        from core.system_controls import execute_sys_control
+        res = execute_sys_control(query)
+        self._show_chat_result(text=res, html="")
+        
+    def _run_file_search(self, query: str):
+        # We already preview it, if they hit enter on a file, it should open it.
+        # This is handled by _on_item_activated
+        pass
+        
+    def _run_reminder(self, query: str):
+        from core.reminders import schedule_reminder
+        import re
+        match = re.match(r"^(?:remind me in|remind in)\s+(\d+\s*[a-z]+)\s+(.+)", query, re.IGNORECASE)
+        if match:
+            res = schedule_reminder(match.group(1), match.group(2))
+        else:
+            match = re.match(r"^(?:(?:add|save|create)?\s*note:?)\s+(.+)", query, re.IGNORECASE)
+            if match:
+                import core.notes as notes
+                res = notes.save_note(match.group(1))
+            else:
+                res = "Could not parse reminder or note format."
+        self._show_chat_result(text=res, html="")
 
     def _show_chat_result(self, html: str = "", text: str = "", action_data: dict = None):
         self._results.stop_border_scan()
@@ -726,7 +1035,7 @@ class OverlayWindow(QWidget):
             grouped[f.get("category", "Other")].append(f)
             
         # Define display order
-        order = ["Video + Audio (HQ Muxed)", "Video + Audio", "Video Only", "Audio Only", "Other"]
+        order = ["Video + Audio (HQ Muxed)", "Video + Audio", "Video Only", "Audio Only", "Images", "Other"]
         
         for cat in order:
             if cat not in grouped or not grouped[cat]:
@@ -748,7 +1057,8 @@ class OverlayWindow(QWidget):
                 )
                 items.append(ri)
                 
-        self._set_badge("YOUTUBE")
+        badge_text = "INSTAGRAM" if "instagram.com" in url else "YOUTUBE"
+        self._set_badge(badge_text)
         self._divider.show()
         self._results.show_results(items)
         self._relayout()
@@ -784,6 +1094,22 @@ class OverlayWindow(QWidget):
 
         self._results.stop_border_scan()
         result = state.get("result", "")
+        
+        # Intercept tool actions
+        if state.get("tool_output"):
+            ui_data = state["tool_output"]
+            if ui_data.get("ui_action") == "image_convert":
+                params = ui_data.get("params", {})
+                self._run_image_convert_explicit(params.get("src", "png"), params.get("tgt", "jpg"))
+                return
+            elif ui_data.get("ui_action") == "image_resize":
+                params = ui_data.get("params", {})
+                self._run_image_resize_explicit(params.get("width", 0), params.get("height", 0))
+                return
+            elif ui_data.get("ui_action") == "yt_download":
+                self._run_yt_list(ui_data.get("params", {}).get("query", ""))
+                return
+
         intent = state.get("intent", "chat")
         msgs   = state.get("messages", [])
         is_first = True
@@ -813,7 +1139,10 @@ class OverlayWindow(QWidget):
                 self._scanner_overlay = None
             
             # Show ourselves again
+            self.setWindowOpacity(1.0)
             self.show()
+            self.raise_()
+            self.activateWindow()
         elif intent in ("app_launch", "calc"):
             self._show_chat_result(html=html_result, text=result, action_data={"scroll_to_bottom": not is_first})
         else:
@@ -840,7 +1169,19 @@ class OverlayWindow(QWidget):
                 '''
                 formatted.append(bubble)
             elif isinstance(m, AIMessage):
-                content = m.content or ""
+                content = m.content
+                if isinstance(content, list):
+                    # Extract text from content blocks if it's a list
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            text_parts.append(block)
+                        elif isinstance(block, dict) and "text" in block:
+                            text_parts.append(block["text"])
+                    content = " ".join(text_parts)
+                elif not isinstance(content, str):
+                    content = str(content or "")
+                
                 if not content.strip() and getattr(m, "tool_calls", None):
                     continue
                 if content.startswith("[Vision Analysis of User's Screen]:\n"):
@@ -870,7 +1211,10 @@ class OverlayWindow(QWidget):
             self._scanner_overlay = None
             
         # Show ourselves again
+        self.setWindowOpacity(1.0)
         self.show()
+        self.raise_()
+        self.activateWindow()
         self._relayout()
 
     def _run_page_analysis(self, query: str):
@@ -942,11 +1286,22 @@ class OverlayWindow(QWidget):
             print(f"[YT] IMPORT ERROR: {exc}")
             self._on_yt_error(str(exc))
             return
-        url = extract_yt_url(query) or query
+            
+        url = extract_yt_url(query)
+        if not url and self._active_tab_url:
+            url = self._active_tab_url
+            
+        # Optional: just do a very loose check to avoid sending Google searches to yt-dlp
+        if not url or ("youtube.com" not in url and "youtu.be" not in url and "instagram.com" not in url):
+            self._on_yt_error("Could not find a valid YouTube or Instagram URL in your command or active browser tab.")
+            return
+            
         print(f"[YT] Extracted URL: {url}")
         self._pending_yt_url = url
         self._results.show_thinking()
-        self._set_badge("YOUTUBE")
+        
+        badge_text = "INSTAGRAM" if "instagram.com" in url else "YOUTUBE"
+        self._set_badge(badge_text)
         self._divider.show()
         self._relayout()
 
@@ -987,9 +1342,20 @@ class OverlayWindow(QWidget):
 
     def _on_yt_folder_change(self):
         from PySide6.QtWidgets import QFileDialog
-        out_dir = QFileDialog.getExistingDirectory(self, "Select Download Folder", self._results._yt_download_dir)
-        if out_dir:
-            self._results._yt_download_dir = out_dir
+        import time
+        
+        self._is_dialog_open = True
+        try:
+            out_dir = QFileDialog.getExistingDirectory(self, "Select Download Folder", self._results._yt_download_dir)
+            if out_dir:
+                self._results._yt_download_dir = out_dir
+        finally:
+            self._hiding = False
+            self.setWindowOpacity(1.0)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self._disable_deactivate_until = time.time() + 1.5
 
     def _start_yt_download(self, url: str, format_id: str, out_dir: str):
         self._results.show_download_progress_mode()
@@ -1046,17 +1412,35 @@ class OverlayWindow(QWidget):
             log.error("Launch failed: %s", exc)
         self.hide_overlay()
 
+    def _launch_file(self, file_path: str):
+        if not file_path:
+            return
+        log.info("Launching file: %s", file_path)
+        try:
+            import os
+            os.startfile(file_path)
+        except Exception as exc:
+            log.error("Launch failed: %s", exc)
+        self.hide_overlay()
+
     # ─────────────────────────────────────────────────────────────────────
     # Lose focus → hide
     # ─────────────────────────────────────────────────────────────────────
 
     def changeEvent(self, event):
         super().changeEvent(event)
-        from PySide6.QtCore import QEvent
+        from PySide6.QtCore import QEvent, QTimer
         if event.type() == QEvent.Type.WindowDeactivate:
             # Small delay so clicks on results don't trigger hide
             QTimer.singleShot(100, self._check_deactivate)
+        elif event.type() == QEvent.Type.WindowActivate:
+            self._is_dialog_open = False
 
     def _check_deactivate(self):
+        import time
+        if getattr(self, "_is_dialog_open", False):
+            return
+        if time.time() < getattr(self, "_disable_deactivate_until", 0):
+            return
         if not self.isActiveWindow() and self.isVisible():
             self.hide_overlay()

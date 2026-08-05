@@ -16,15 +16,15 @@ log = logging.getLogger(__name__)
 # Default download directory — ~/Downloads
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads")
 
-_YT_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w\-]+(?:&\S*)?",
+_MEDIA_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/watch\?.*v=|youtu\.be/|instagram\.com/(?:p|reel|reels|tv)/)[\w\-]+(?:&\S*)?",
     re.IGNORECASE,
 )
 
 
 def extract_yt_url(text: str) -> Optional[str]:
-    """Extract the first YouTube URL from a string, or None."""
-    m = _YT_URL_RE.search(text)
+    """Extract the first media URL from a string, or None."""
+    m = _MEDIA_URL_RE.search(text)
     return m.group(0) if m else None
 
 
@@ -54,9 +54,19 @@ def list_formats(url: str) -> list[dict]:
         print(f"[YT] extract_info returned successfully")
     except Exception as exc:
         print(f"[YT] extract_info FAILED: {type(exc).__name__}: {exc}")
-        import traceback
-        traceback.print_exc()
-        raise RuntimeError(f"yt-dlp failed: {exc}") from exc
+        import re
+        err_msg = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', str(exc))
+        if "No video formats found" in err_msg and "instagram.com" in url:
+            # This is likely an Instagram image post!
+            return [{
+                "category": "Images",
+                "format_id": "ig_images",
+                "ext": "jpg/png",
+                "height": None,
+                "note": "Instagram Post Images (Full Quality)",
+                "filesize": None
+            }]
+        raise RuntimeError(f"Download failed: {err_msg}") from exc
 
     if not info:
         print("[YT] extract_info returned None/empty!")
@@ -115,9 +125,20 @@ def list_formats(url: str) -> list[dict]:
     
     # Sort audio by bitrate or filesize if possible
     ao.sort(key=lambda x: x.get("filesize") or 0, reverse=True)
+    
+    # Inject MP3 320kbps option
+    mp3_option = {
+        "category": "Audio Only",
+        "format_id": "bestaudio_mp3_320",
+        "ext": "mp3",
+        "height": None,
+        "note": "[mp3] 320kbps (Converted Best Audio)",
+        "filesize": None
+    }
+    ao.insert(0, mp3_option)
 
-    # Return a curated list: top 6 HQ, top 2 basic, top 4 audio
-    curated = va_hq[:6] + va[:2] + ao[:4]
+    # Return a curated list: top 6 HQ, top 2 basic, top 5 audio
+    curated = va_hq[:6] + va[:2] + ao[:5]
     return curated if curated else result[:15]
 
 
@@ -152,8 +173,49 @@ def download(
             if d.get("status") == "finished":
                 filepath_holder["path"] = d.get("filename", "")
 
+        if format_id == "ig_images" and "instagram.com" in url:
+            # Run instaloader for image posts
+            try:
+                import instaloader
+            except ImportError:
+                return {"success": False, "filepath": "", "error": "instaloader is not installed. Please run: pip install instaloader"}
+                
+            m = re.search(r'instagram\.com/(?:p|reel|reels|tv)/([^/?]+)', url)
+            if not m:
+                return {"success": False, "filepath": "", "error": "Could not extract Instagram shortcode"}
+            
+            shortcode = m.group(1)
+            post_dir = os.path.join(output_dir, f"Instagram_{shortcode}")
+            
+            if progress_callback:
+                progress_callback({"status": "downloading", "filename": f"Instagram Images ({shortcode})"})
+                
+            L = instaloader.Instaloader(
+                download_videos=False,
+                download_video_thumbnails=False,
+                download_geotags=False,
+                download_comments=False,
+                save_metadata=False,
+                compress_json=False,
+                dirname_pattern=f"Instagram_{shortcode}"
+            )
+            
+            # Temporarily change working directory so instaloader doesn't sanitize absolute paths
+            old_cwd = os.getcwd()
+            os.makedirs(output_dir, exist_ok=True)
+            os.chdir(output_dir)
+            try:
+                post = instaloader.Post.from_shortcode(L.context, shortcode)
+                L.download_post(post, target="")
+            finally:
+                os.chdir(old_cwd)
+            
+            if progress_callback:
+                progress_callback({"status": "finished", "filename": post_dir})
+                
+            return {"success": True, "filepath": post_dir, "error": None}
+
         ydl_opts = {
-            "format": format_id,
             "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
@@ -161,6 +223,16 @@ def download(
             "merge_output_format": "mp4",
             "noplaylist": True,
         }
+        
+        if format_id == "bestaudio_mp3_320":
+            ydl_opts["format"] = "bestaudio/best"
+            ydl_opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "320",
+            }]
+        else:
+            ydl_opts["format"] = format_id
 
         try:
             import imageio_ffmpeg
@@ -171,19 +243,23 @@ def download(
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
-        return {"success": True, "filepath": filepath_holder["path"], "error": None}
+        final_path = filepath_holder["path"]
+        if format_id == "bestaudio_mp3_320" and final_path:
+            base, _ = os.path.splitext(final_path)
+            final_path = f"{base}.mp3"
+
+        return {"success": True, "filepath": final_path, "error": None}
 
     except Exception as exc:
-        import re
         err_msg = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', str(exc))
-        log.error("yt-dlp download failed: %s", err_msg)
+        log.error("download failed: %s", err_msg)
         return {"success": False, "filepath": "", "error": err_msg}
 
 
 @tool
 def download_youtube_video(url: str) -> str:
     """
-    List available yt-dlp formats for a YouTube URL so the user can
+    List available yt-dlp formats for a media URL so the user can
     choose a quality to download. Returns a formatted list of format options.
     The actual download is triggered separately once the user picks a format.
     """
