@@ -193,9 +193,6 @@ class OverlayWindow(QWidget):
         self._apply_stylesheet()
         self._connect_signals()
         self._setup_animations()
-        
-        # Shrink the window initially so the very first show_overlay() forces an expansion!
-        self.resize(self.width(), 10)
 
         self._conversation_messages: list = []
         self._active_tab_url: Optional[str] = None
@@ -345,13 +342,6 @@ class OverlayWindow(QWidget):
         
         self._is_active = True
         self._position_on_active_monitor()
-        
-        # Windows 11 DWM drops the blur buffer when the window is off-screen.
-        # By ensuring the window was shrunk when hidden, calling _relayout() here
-        # forces adjustSize() to expand it back to normal size WHILE on-screen.
-        # This size change natively guarantees DWM recalculates the blur instantly!
-        self._relayout()
-
         self._hiding = False
 
         # Grab the active browser URL for context before we steal focus!
@@ -362,6 +352,18 @@ class OverlayWindow(QWidget):
         self.activateWindow()
         self._search.setFocus()
         self._search.selectAll()
+
+        # Fix Windows 11 DWM initial missing blur bug:
+        # If we resize the window simultaneously while moving it on-screen, DWM still ignores it.
+        # We MUST resize the window AFTER it is fully painted on the monitor!
+        if not getattr(self, "_first_show_done", False):
+            self._first_show_done = True
+            QTimer.singleShot(50, self._jiggle_for_dwm)
+
+    def _jiggle_for_dwm(self):
+        """Force a 1-pixel resize *after* the window is visible to kickstart DWM Acrylic."""
+        self.resize(self.width(), self.height() + 1)
+        self._relayout()
 
     def hide_overlay(self):
         if not self._is_active:
@@ -375,8 +377,6 @@ class OverlayWindow(QWidget):
         
         # Instantly hide by moving off-screen to preserve DWM blur composition!
         self.move(-10000, -10000)
-        # Shrink the window so the next show_overlay() forces an expansion!
-        self.resize(self.width(), 10)
         self.lower()  # Force Windows to give focus back to the previous app
 
     def _on_anim_finished(self):
