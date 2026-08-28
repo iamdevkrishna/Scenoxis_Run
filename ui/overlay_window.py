@@ -342,6 +342,21 @@ class OverlayWindow(QWidget):
         
         self._is_active = True
         self._position_on_active_monitor()
+        
+        # Windows 11 DWM drops the blur buffer when the window is first spawned off-screen.
+        # Natively resizing by 1 pixel via ctypes (bypassing Qt's event optimizations)
+        # forces DWM to instantly composite the Acrylic blur!
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            w, h = self.width(), self.height()
+            # SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            flags = 0x0020 | 0x0002 | 0x0004 | 0x0010
+            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, w, h + 1, flags)
+            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, w, h, flags)
+        except Exception:
+            pass
+
         self._hiding = False
 
         # Grab the active browser URL for context before we steal focus!
