@@ -692,9 +692,14 @@ class ResultsPanel(QWidget):
         self.setMinimumHeight(60)
         self.setMaximumHeight(100)
 
-    def update_download_progress(self, downloaded: int, total: int):
+    def update_download_progress(self, downloaded: int, total: int, msg: str = ""):
         self._progress_bar.show()
         self._download_status_label.show()
+        
+        if msg:
+            self._download_status_label.setText(msg)
+            return
+            
         mb_done = downloaded / 1024 / 1024
         
         if total > 0:

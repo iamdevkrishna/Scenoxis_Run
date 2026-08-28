@@ -89,7 +89,7 @@ class PageAnalysisWorker(QObject):
 
 
 class YTDownloadWorker(QObject):
-    progress = Signal(int, int)   # downloaded_bytes, total_bytes
+    progress = Signal(int, int, str)   # downloaded_bytes, total_bytes, message
     finished = Signal(dict)
     error    = Signal(str)
 
@@ -107,7 +107,8 @@ class YTDownloadWorker(QObject):
                 if d.get("status") == "downloading":
                     dl   = d.get("downloaded_bytes", 0)
                     tot  = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                    self.progress.emit(dl, tot)
+                    msg  = d.get("filename", "") if not dl and not tot else ""
+                    self.progress.emit(dl, tot, msg)
 
             result = download(self.url, self.format_id, output_dir=self.output_dir, progress_callback=_cb)
             self.finished.emit(result)
@@ -463,33 +464,48 @@ class OverlayWindow(QWidget):
     # ─────────────────────────────────────────────────────────────────────
 
     def paintEvent(self, event):
-        """Frosted-glass Spotlight card — dark tint painted inside rounded clip."""
+        """Frosted-glass Spotlight card — dark or light tint painted inside rounded clip."""
         try:
-            from PySide6.QtGui import QLinearGradient, QBrush, QPainterPath, QPen
+            from PySide6.QtGui import QLinearGradient, QBrush, QPainterPath, QPen, QColor, QPainter
+            from core.config import is_dark_mode
             w, h = self.width(), self.height()
             r = CARD_RADIUS
 
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+            dark = is_dark_mode()
+
             # We don't clip the path anymore! 
             # Windows 11 DWM native corner rounding (DWMWCP_ROUND) will smoothly clip the window.
             # We just paint the full rect.
 
-            # ── Layer 1: Dark semi-transparent background ─────────────────
-            painter.fillRect(self.rect(), QColor(18, 18, 22, 210))
+            # ── Layer 1: Semi-transparent background ──────────────────────────────
+            if dark:
+                painter.fillRect(self.rect(), QColor(18, 18, 22, 210))
+            else:
+                painter.fillRect(self.rect(), QColor(245, 245, 245, 210))
 
-            # ── Layer 2: Glossy top reflection (Spotlight signature) ───────
+            # ── Layer 2: Glossy top reflection (Spotlight signature) ───────────────
             gloss = QLinearGradient(0, 0, 0, 60)
-            gloss.setColorAt(0.0, QColor(255, 255, 255, 18))
-            gloss.setColorAt(0.5, QColor(255, 255, 255, 5))
-            gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
+            if dark:
+                gloss.setColorAt(0.0, QColor(255, 255, 255, 18))
+                gloss.setColorAt(0.5, QColor(255, 255, 255, 5))
+                gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
+            else:
+                gloss.setColorAt(0.0, QColor(255, 255, 255, 80))
+                gloss.setColorAt(0.5, QColor(255, 255, 255, 30))
+                gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
             painter.fillRect(0, 0, w, 60, QBrush(gloss))
 
-            # ── Layer 3: Subtle inner glow at bottom ──────────────────────
+            # ── Layer 3: Subtle inner glow at bottom ──────────────────────────────
             bottom_glow = QLinearGradient(0, h - 20, 0, h)
-            bottom_glow.setColorAt(0.0, QColor(255, 255, 255, 0))
-            bottom_glow.setColorAt(1.0, QColor(255, 255, 255, 3))
+            if dark:
+                bottom_glow.setColorAt(0.0, QColor(255, 255, 255, 0))
+                bottom_glow.setColorAt(1.0, QColor(255, 255, 255, 3))
+            else:
+                bottom_glow.setColorAt(0.0, QColor(0, 0, 0, 0))
+                bottom_glow.setColorAt(1.0, QColor(0, 0, 0, 10))
             painter.fillRect(0, h - 20, w, 20, QBrush(bottom_glow))
 
             # ── Layer 4: Hairline border with gradient opacity ────────────
@@ -1408,15 +1424,8 @@ class OverlayWindow(QWidget):
             return
         try:
             import os
-            if exe_path.lower().endswith(".exe"):
-                subprocess.Popen(
-                    [exe_path],
-                    shell=False,
-                    close_fds=True,
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                )
-            else:
-                os.startfile(exe_path)
+            # Use os.startfile instead of subprocess so console apps (cmd, powershell) get a visible window
+            os.startfile(exe_path)
         except Exception as exc:
             log.error("Launch failed: %s", exc)
         self.hide_overlay()

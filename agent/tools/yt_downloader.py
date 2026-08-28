@@ -78,13 +78,18 @@ def _reencode_to_h264(filepath: str, progress_callback=None) -> str:
                 "filename": "Optimizing video for editing software (H.264)..."
             })
 
+        import sys
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         subprocess.run([
             ffmpeg_exe, "-y", "-i", filepath,
             "-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             fixed_path,
-        ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200)
+        ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200, creationflags=creationflags)
 
         if os.path.exists(fixed_path) and os.path.getsize(fixed_path) > 0:
             try:
