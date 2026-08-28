@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QFrame, QApplication, QSizePolicy,
 )
 
-from core import dwm_blur
 from ui.search_bar import SearchBar
 from ui.results_panel import ResultsPanel
 from ui.result_item import ResultItem, ResultKind
@@ -186,8 +185,8 @@ class _MonoSearchIcon(QWidget):
 class OverlayWindow(QWidget):
     toggle_visibility = Signal()
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self._setup_window()
         self._load_fonts()
         self._build_ui()
@@ -203,6 +202,7 @@ class OverlayWindow(QWidget):
         self._pending_yt_url: str = ""
         self._is_animating = False
         self._target_y = 0
+        self._is_active = False  # Track logical visibility since we never hide it natively
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -215,16 +215,19 @@ class OverlayWindow(QWidget):
     # ─────────────────────────────────────────────────────────────────────
 
     def _setup_window(self):
+        # DO NOT use FramelessWindowHint, as it breaks Windows 11 DWM backdrops on Insider builds.
+        # Instead, we use CustomizeWindowHint and Tool.
+        # Tool hides it from the taskbar and Alt+Tab, and disables standard DWM show animations!
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool,
+            Qt.WindowType.Window |
+            Qt.WindowType.CustomizeWindowHint |
+            Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.setWindowTitle("Scenoxis Run")
         self.setObjectName("ScenoxisOverlay")
-        self.setWindowOpacity(0.0)   # start invisible for fade-in
         self._dialog_open = False    # flag to prevent auto-hide when a dialog is open
 
     def _load_fonts(self):
@@ -280,13 +283,13 @@ class OverlayWindow(QWidget):
         self._results = ResultsPanel()
         card_layout.addWidget(self._results)
 
-        outer.addWidget(self._card, alignment=Qt.AlignmentFlag.AlignHCenter)
+        outer.addWidget(self._card, alignment=Qt.AlignmentFlag.AlignCenter)
         self._card.adjustSize()
 
     def _apply_stylesheet(self):
         import os
-        from core.config import is_dark_mode
-        qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
+        from core.config import is_dark_mode, get_resource_path
+        qss_path = get_resource_path("ui", "styles.qss")
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
                 qss = f.read()
@@ -308,9 +311,6 @@ class OverlayWindow(QWidget):
         self._pos_anim = QPropertyAnimation(self, b"pos", self)
         self._pos_anim.setDuration(ANIM_DURATION)
         self._pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        # When hide animation completes, actually hide the window
-        self._opacity_anim.finished.connect(self._on_anim_finished)
 
     def _connect_signals(self):
         self._search.textChanged.connect(self._on_text_changed)
@@ -337,77 +337,44 @@ class OverlayWindow(QWidget):
     # ─────────────────────────────────────────────────────────────────────
 
     def show_overlay(self):
-        if self._is_animating and self.isVisible():
+        if self._is_active:
             return
+        
+        self._is_active = True
         self._position_on_active_monitor()
-        self._apply_acrylic()
-        self._is_animating = True
         self._hiding = False
 
         # Grab the active browser URL for context before we steal focus!
         import core.browser_tracker as bt
         self._active_tab_url = bt.get_active_browser_url()
-
-        # Start 12px above target, slide down
-        target = self.pos()
-        start  = QPoint(target.x(), target.y() - 12)
-        self.move(start)
-
-        self.setWindowOpacity(0.0)
-        self.show()
+        
         self.raise_()
         self.activateWindow()
         self._search.setFocus()
         self._search.selectAll()
 
-        # Animate in
-        self._opacity_anim.stop()
-        self._opacity_anim.setStartValue(0.0)
-        self._opacity_anim.setEndValue(1.0)
-        self._opacity_anim.start()
-
-        self._pos_anim.stop()
-        self._pos_anim.setStartValue(start)
-        self._pos_anim.setEndValue(target)
-        self._pos_anim.start()
-
     def hide_overlay(self):
-        if not self.isVisible():
+        if not self._is_active:
             return
-        if self._is_animating and getattr(self, '_hiding', False):
-            return
-        self._is_animating = True
-        self._hiding = True
-
-        cur = self.pos()
-        end = QPoint(cur.x(), cur.y() - 8)
-
-        self._opacity_anim.stop()
-        self._opacity_anim.setStartValue(self.windowOpacity())
-        self._opacity_anim.setEndValue(0.0)
-        self._opacity_anim.start()
-
-        self._pos_anim.stop()
-        self._pos_anim.setStartValue(cur)
-        self._pos_anim.setEndValue(end)
-        self._pos_anim.start()
+        self._is_active = False
+        self._hiding = False
+        self._results.clear()
+        self._badge.hide()
+        self._divider.hide()
+        self._conversation_messages = []
+        
+        # Instantly hide by moving off-screen to preserve DWM blur composition!
+        self.move(-10000, -10000)
+        self.lower()  # Force Windows to give focus back to the previous app
+        self._relayout()
 
     def _on_anim_finished(self):
         self._is_animating = False
-        if getattr(self, '_hiding', False):
-            self._hiding = False
-            self._results.clear()
-            self._badge.hide()
-            self._divider.hide()
-            self._conversation_messages = []
-            self.hide()
-            self.setWindowOpacity(0.0)
-            self._relayout()
 
     def _on_toggle(self):
-        if self.isVisible() and not getattr(self, '_hiding', False):
+        if self._is_active:
             self.hide_overlay()
-        elif not self.isVisible() or getattr(self, '_hiding', False):
+        else:
             self.show_overlay()
 
     def hotkey_callback(self):
@@ -440,6 +407,7 @@ class OverlayWindow(QWidget):
     def _apply_acrylic(self):
         try:
             from core.config import is_dark_mode
+            from core import dwm_blur
             hwnd = int(self.winId())
             # Tint nearly transparent — let DWM just blur, we paint our own
             # dark background inside the rounded clip path in paintEvent
@@ -447,9 +415,49 @@ class OverlayWindow(QWidget):
         except Exception as exc:
             log.debug("_apply_acrylic failed: %s", exc)
 
+    def nativeEvent(self, eventType, message):
+        try:
+            import ctypes
+            from ctypes.wintypes import MSG
+            msg = MSG.from_address(message.__int__())
+            
+            # WM_NCCALCSIZE = 0x0083
+            if msg.message == 0x0083:
+                # By returning 0 when wParam is True, we tell Windows that our client area 
+                # covers the entire window. This hides the standard title bar but preserves 
+                # the DWM frame, drop shadow, and Mica/Acrylic backdrops!
+                if msg.wParam:
+                    return True, 0
+            
+            # WM_NCHITTEST = 0x0084
+            elif msg.message == 0x0084:
+                # Return HTCLIENT (1) so the window cannot be moved or resized by dragging
+                return True, 1
+                
+        except Exception as e:
+            log.error(f"Error in nativeEvent: {e}")
+            
+        return super().nativeEvent(eventType, message)
+
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(30, self._apply_acrylic)
+        
+        # Apply the Acrylic blur synchronously so it's ready before the fade-in animation starts
+        self._apply_acrylic()
+
+        # Remove WS_SYSMENU, WS_BORDER, and WS_THICKFRAME to completely hide the 
+        # standard Windows 11 1px glowing outline!
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            GWL_STYLE = -16
+            WS_SYSMENU = 0x00080000
+            WS_BORDER = 0x00800000
+            WS_THICKFRAME = 0x00040000
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style & ~WS_SYSMENU & ~WS_BORDER & ~WS_THICKFRAME)
+        except Exception as e:
+            log.error(f"Failed to remove window buttons: {e}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -481,10 +489,11 @@ class OverlayWindow(QWidget):
             # We just paint the full rect.
 
             # ── Layer 1: Semi-transparent background ──────────────────────────────
+            # Pure black at 110 opacity allows for a very dark tint WITHOUT masking the blur!
             if dark:
-                painter.fillRect(self.rect(), QColor(18, 18, 22, 210))
+                painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
             else:
-                painter.fillRect(self.rect(), QColor(245, 245, 245, 210))
+                painter.fillRect(self.rect(), QColor(245, 245, 245, 140))
 
             # ── Layer 2: Glossy top reflection (Spotlight signature) ───────────────
             gloss = QLinearGradient(0, 0, 0, 60)

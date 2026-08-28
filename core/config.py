@@ -54,6 +54,14 @@ def get_api_key(service: str) -> str:
         key = os.environ.get(f"{service.upper()}_API_KEY", "")
     return key
 
+def get_llm_model() -> str:
+    """Gets the main LLM model from env or config."""
+    return os.environ.get("LLM_MODEL") or get("LLM_MODEL", "openai/gpt-oss-120b")
+
+def get_vision_model() -> str:
+    """Gets the vision model from env or config."""
+    return os.environ.get("VISION_MODEL") or get("VISION_MODEL", "qwen/qwen3.6-27b")
+
 def is_dark_mode() -> bool:
     """Determine if we should use dark mode."""
     theme = get("theme", "system").lower()
@@ -70,3 +78,9 @@ def is_dark_mode() -> bool:
         return value == 0
     except Exception:
         return True # Default to dark on error
+
+def get_resource_path(*path_parts: str) -> str:
+    """Gets the absolute path to a resource, handling PyInstaller's _MEIPASS."""
+    import sys
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_path, *path_parts)

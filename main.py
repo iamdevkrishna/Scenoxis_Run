@@ -85,8 +85,11 @@ def main() -> int:
         pass
 
     # ── Create overlay (hidden) ───────────────────────────────────────────
+    # We cannot use dummy_parent because it breaks PySide6 WA_TranslucentBackground
     window = OverlayWindow()
-    window.hide()
+    # Initialize the window by showing it off-screen, forcing DWM to compile the blur frame.
+    window.show()
+    window.move(-10000, -10000)
     log.info("Overlay window created")
 
     # ── App index scan (background thread) ───────────────────────────────
@@ -113,9 +116,15 @@ def main() -> int:
 
     # ── System Tray ───────────────────────────────────────────────────────
     tray_icon = QSystemTrayIcon(app)
-    icon = QIcon("assets/icon.png")
+    
+    from core.config import get_resource_path
+    icon_path = get_resource_path("assets", "icon.png")
+    icon = QIcon(icon_path)
     if not icon.isNull():
         tray_icon.setIcon(icon)
+    else:
+        from PySide6.QtWidgets import QStyle
+        tray_icon.setIcon(app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
     
     tray_menu = QMenu()
     

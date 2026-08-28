@@ -108,12 +108,55 @@ def apply_blur(hwnd: int, dark_mode: bool = True, tint_color: int = 0x01000000) 
     except Exception as exc:
         log.debug("DWM corner rounding not available (Win10?): %s", exc)
 
-    # ── Apply WCA Acrylic ─────────────────────────────────────────────────
+    # ── Apply Windows 11 System Backdrop (Mica/Acrylic) ───────────────────
+    try:
+        DWMWA_SYSTEMBACKDROP_TYPE = 38
+        DWMSBT_TRANSIENTWINDOW = 3  # Acrylic
+        
+        # 1. Extend frame into client area so backdrop covers everything
+        class MARGINS(ctypes.Structure):
+            _fields_ = [("cxLeftWidth", ctypes.c_int),
+                        ("cxRightWidth", ctypes.c_int),
+                        ("cyTopHeight", ctypes.c_int),
+                        ("cyBottomHeight", ctypes.c_int)]
+        margins = MARGINS(-1, -1, -1, -1)
+        dwmapi.DwmExtendFrameIntoClientArea(ctypes.wintypes.HWND(hwnd), ctypes.byref(margins))
+
+        # 2. Set Backdrop type to Acrylic
+        backdrop_type = ctypes.c_int(DWMSBT_TRANSIENTWINDOW)
+        res = dwmapi.DwmSetWindowAttribute(
+            ctypes.wintypes.HWND(hwnd),
+            ctypes.wintypes.DWORD(DWMWA_SYSTEMBACKDROP_TYPE),
+            ctypes.byref(backdrop_type),
+            ctypes.wintypes.DWORD(ctypes.sizeof(backdrop_type)),
+        )
+        
+        # 3. Remove the standard Windows 11 outline border
+        try:
+            DWMWA_BORDER_COLOR = 34
+            DWMWA_COLOR_NONE = 0xFFFFFFFE
+            border_color = ctypes.c_uint(DWMWA_COLOR_NONE)
+            dwmapi.DwmSetWindowAttribute(
+                ctypes.wintypes.HWND(hwnd),
+                ctypes.wintypes.DWORD(DWMWA_BORDER_COLOR),
+                ctypes.byref(border_color),
+                ctypes.wintypes.DWORD(ctypes.sizeof(border_color)),
+            )
+        except Exception as e:
+            log.debug("DWM attribute setting failed: %s", e)
+
+        if res == 0:
+            log.debug("DWM System Backdrop applied to HWND=%s", hwnd)
+            return True
+    except Exception as exc:
+        log.debug("DWM System Backdrop failed: %s", exc)
+
+    # ── Fallback to WCA Acrylic ───────────────────────────────────────────
     try:
         fn = _get_set_wca()
         if fn is not None:
             accent = _ACCENT_POLICY()
-            accent.AccentState   = ACCENT_ENABLE_ACRYLICBLURBEHIND
+            accent.AccentState   = ACCENT_ENABLE_BLURBEHIND
             accent.AccentFlags   = 2
             accent.GradientColor = tint_color  # AABBGGRR
             accent.AnimationId   = 0

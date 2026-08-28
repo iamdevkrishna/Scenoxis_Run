@@ -26,9 +26,8 @@ class FeaturesWindow(QDialog):
         layout.addLayout(btn_layout)
 
     def _load_readme(self):
-        # We need to find README.md either in local dir or bundled app path
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        readme_path = os.path.join(base_path, "README.md")
+        from core.config import get_resource_path
+        readme_path = get_resource_path("README.md")
         
         if os.path.exists(readme_path):
             try:

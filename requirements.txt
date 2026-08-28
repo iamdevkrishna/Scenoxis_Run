@@ -37,3 +37,6 @@ markdown>=3.7
 
 # File watching for prompt hot-reload
 watchdog>=4.0
+
+# Windows 11 Native Acrylic/Mica UI styling
+pywinstyles==1.8
