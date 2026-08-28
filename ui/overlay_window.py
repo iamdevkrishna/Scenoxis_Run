@@ -370,10 +370,6 @@ class OverlayWindow(QWidget):
             return
         self._is_active = False
         self._hiding = False
-        self._results.clear()
-        self._badge.hide()
-        self._divider.hide()
-        self._conversation_messages = []
         
         # Instantly hide by moving off-screen to preserve DWM blur composition!
         self.move(-10000, -10000)
