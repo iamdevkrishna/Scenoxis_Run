@@ -118,7 +118,7 @@ def _call_groq_vision(image_bytes: bytes, prompt: str) -> str:
     """Send image to Groq vision model and return the text response."""
     try:
         from groq import Groq
-        from core.config import get_api_key
+        from core.config import get_api_key, get_vision_model
         api_key = get_api_key("GROQ")
         if not api_key:
             return "GROQ_API_KEY not set."
@@ -137,7 +137,7 @@ def _call_groq_vision(image_bytes: bytes, prompt: str) -> str:
         client = Groq(api_key=api_key, timeout=15.0, max_retries=0)
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         response = client.chat.completions.create(
-            model="qwen/qwen3.6-27b",
+            model=get_vision_model(),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {

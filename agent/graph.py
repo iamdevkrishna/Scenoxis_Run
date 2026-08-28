@@ -74,9 +74,9 @@ def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
         prompt_cfg = _load_prompt("chat_system.yaml")
-        from core.config import get_api_key
+        from core.config import get_api_key, get_llm_model
         _llm = ChatGroq(
-            model=prompt_cfg.get("model", "llama-3.3-70b-versatile"),
+            model=get_llm_model(),
             temperature=prompt_cfg.get("temperature", 0.4),
             max_tokens=prompt_cfg.get("max_tokens", 1024),
             api_key=get_api_key("GROQ"),
