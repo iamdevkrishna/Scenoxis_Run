@@ -28,6 +28,80 @@ def extract_yt_url(text: str) -> Optional[str]:
     return m.group(0) if m else None
 
 
+# ── Codecs that need re-encoding for editor compatibility ─────────────────
+_INCOMPATIBLE_CODECS = {"av1", "av01", "vp9", "vp09", "hevc", "h265", "hev1"}
+
+
+def _probe_video_codec(filepath: str) -> Optional[str]:
+    """Use FFprobe to detect the video codec of a file. Returns codec name or None."""
+    try:
+        import subprocess
+        try:
+            import imageio_ffmpeg
+            ffprobe_exe = imageio_ffmpeg.get_ffmpeg_exe().replace("ffmpeg", "ffprobe")
+        except ImportError:
+            ffprobe_exe = "ffprobe"
+
+        result = subprocess.run(
+            [ffprobe_exe, "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", filepath],
+            capture_output=True, text=True, timeout=10,
+        )
+        codec = result.stdout.strip().lower()
+        return codec if codec else None
+    except Exception as exc:
+        log.debug("ffprobe codec detection failed: %s", exc)
+        return None
+
+
+def _reencode_to_h264(filepath: str, progress_callback=None) -> str:
+    """
+    Universally re-encode video to H.264 + AAC + yuv420p to guarantee 
+    compatibility with Premiere Pro, DaVinci Resolve, and all NLEs.
+    Uses 'superfast' preset to avoid long wait times.
+    """
+    log.info("Forcing universal H.264 NLE-friendly re-encode for: %s", filepath)
+
+    try:
+        import subprocess
+        try:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            ffmpeg_exe = "ffmpeg"
+
+        fixed_path = filepath.rsplit(".", 1)[0] + "_editor_friendly.mp4"
+
+        if progress_callback:
+            progress_callback({
+                "status": "downloading",
+                "filename": "Optimizing video for editing software (H.264)..."
+            })
+
+        subprocess.run([
+            ffmpeg_exe, "-y", "-i", filepath,
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            fixed_path,
+        ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1200)
+
+        if os.path.exists(fixed_path) and os.path.getsize(fixed_path) > 0:
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+            log.info("Optimized for editors: %s", fixed_path)
+            return fixed_path
+        else:
+            log.warning("Re-encode produced empty file, keeping original")
+            return filepath
+
+    except Exception as exc:
+        log.warning("H.264 re-encode failed: %s — keeping original", exc)
+        return filepath
+
+
 def list_formats(url: str) -> list[dict]:
     """
     Use yt-dlp to list available formats for a YouTube URL.
@@ -45,7 +119,13 @@ def list_formats(url: str) -> list[dict]:
         "nocheckcertificate": True,
         "no_check_certificates": True,
         "noplaylist": True,
+        "extractor_args": {"youtube": ["player_client=android"]},
     }
+    try:
+        import imageio_ffmpeg
+        ydl_opts["ffmpeg_location"] = imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        pass
     print(f"[YT] list_formats() called for: {url}")
     print(f"[YT] Calling yt_dlp.extract_info (this may take a moment)...")
     try:
@@ -87,12 +167,20 @@ def list_formats(url: str) -> list[dict]:
 
         # Categorize
         fmt_id = f.get("format_id", "?")
+
+        # Short codec label for display
+        vcodec_short = ""
+        if vcodec != "none":
+            vc = vcodec.split(".")[0].lower()  # e.g. "av01.0.08M.08" → "av01"
+            codec_map = {"avc1": "H.264", "h264": "H.264", "av01": "AV1", "vp9": "VP9", "vp09": "VP9", "hev1": "HEVC", "hevc": "HEVC"}
+            vcodec_short = codec_map.get(vc, vc.upper())
+
         if vcodec != "none" and acodec != "none":
             cat = "Video + Audio"
-            note = f"{height}p{int(fps) if fps else ''} [{ext}]"
+            note = f"{height}p{int(fps) if fps else ''} [{ext}] {vcodec_short}"
         elif vcodec != "none":
             cat = "Video + Audio (HQ Muxed)"
-            note = f"{height}p{int(fps) if fps else ''} [{ext}]"
+            note = f"{height}p{int(fps) if fps else ''} [{ext}] {vcodec_short}"
             fmt_id = f"{fmt_id}+bestaudio/best"
         elif acodec != "none":
             cat = "Audio Only"
@@ -100,6 +188,10 @@ def list_formats(url: str) -> list[dict]:
         else:
             cat = "Other"
             note = f"[{ext}] unknown"
+
+        # Mark editor-incompatible codecs
+        if vcodec_short in ("AV1", "VP9", "HEVC"):
+            note += " → auto H.264"
 
         size_str = ""
         if fsize:
@@ -222,6 +314,8 @@ def download(
             "progress_hooks": [_hook],
             "merge_output_format": "mp4",
             "noplaylist": True,
+            "extractor_args": {"youtube": ["player_client=android"]},
+            "nocheckcertificate": True,
         }
         
         if format_id == "bestaudio_mp3_320":
@@ -241,12 +335,23 @@ def download(
             pass
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
 
-        final_path = filepath_holder["path"]
+        if info and "requested_downloads" in info and len(info["requested_downloads"]) > 0:
+            final_path = info["requested_downloads"][0]["filepath"]
+        elif info:
+            final_path = ydl.prepare_filename(info)
+        else:
+            final_path = filepath_holder["path"]
         if format_id == "bestaudio_mp3_320" and final_path:
             base, _ = os.path.splitext(final_path)
             final_path = f"{base}.mp3"
+        elif final_path and not final_path.lower().endswith(".mp3"):
+            # ── Universal H.264 re-encode ─────────────────────────────────
+            # AV1, VP9, HEVC, and even some YouTube H.264 streams (VFR/yuvj420p) 
+            # crash Premiere Pro and DaVinci Resolve.
+            # We enforce a universal re-encode to baseline H.264 for all video downloads.
+            final_path = _reencode_to_h264(final_path, progress_callback)
 
         return {"success": True, "filepath": final_path, "error": None}
 
