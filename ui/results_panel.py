@@ -64,6 +64,42 @@ def _extract_win32_icon(exe_path: str, size: int = 32) -> Optional[QPixmap]:
         user32  = ctypes.windll.user32
         gdi32   = ctypes.windll.gdi32
 
+        shell32.SHGetFileInfoW.argtypes = [wt.LPCWSTR, wt.DWORD, ctypes.c_void_p, wt.UINT, wt.UINT]
+        shell32.SHGetFileInfoW.restype = ctypes.c_void_p
+
+        user32.GetDC.argtypes = [ctypes.c_void_p]
+        user32.GetDC.restype = ctypes.c_void_p
+
+        gdi32.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
+        gdi32.CreateCompatibleDC.restype = ctypes.c_void_p
+
+        gdi32.CreateDIBSection.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.UINT, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD]
+        gdi32.CreateDIBSection.restype = ctypes.c_void_p
+
+        gdi32.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        gdi32.SelectObject.restype = ctypes.c_void_p
+
+        user32.DrawIconEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, wt.UINT, ctypes.c_void_p, wt.UINT]
+        user32.DrawIconEx.restype = wt.BOOL
+
+        gdi32.GetBitmapBits.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+        gdi32.GetBitmapBits.restype = ctypes.c_int
+
+        gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+        gdi32.DeleteObject.restype = wt.BOOL
+
+        gdi32.DeleteDC.argtypes = [ctypes.c_void_p]
+        gdi32.DeleteDC.restype = wt.BOOL
+
+        user32.ReleaseDC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.ReleaseDC.restype = ctypes.c_int
+
+        user32.DestroyIcon.argtypes = [ctypes.c_void_p]
+        user32.DestroyIcon.restype = wt.BOOL
+
+        gdi32.PatBlt.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.DWORD]
+        gdi32.PatBlt.restype = wt.BOOL
+
         info = _SHFI()
         ret = shell32.SHGetFileInfoW(
             exe_path, 0, ctypes.byref(info), ctypes.sizeof(info),
@@ -107,7 +143,7 @@ def _extract_win32_icon(exe_path: str, size: int = 32) -> Optional[QPixmap]:
 
         n   = size * size * 4
         buf = (ctypes.c_char * n)()
-        gdi32.GetBitmapBits(hbm, n, buf)
+        gdi32.GetBitmapBits(hbm, n, ctypes.byref(buf))
 
         gdi32.SelectObject(mem_dc, old)
         gdi32.DeleteObject(hbm)
@@ -120,8 +156,9 @@ def _extract_win32_icon(exe_path: str, size: int = 32) -> Optional[QPixmap]:
         result = QPixmap.fromImage(img.copy())
         pix = result if not result.isNull() else None
 
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Icon extraction failed for %s: %s", exe_path, e, exc_info=True)
 
     _icon_cache[cache_key] = pix
     return pix
@@ -751,7 +788,7 @@ class ResultsPanel(QWidget):
 
             if ri.kind == ResultKind.APP:
                 widget = AppResultWidget(ri)
-                litem.setSizeHint(widget.sizeHint())
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind in (ResultKind.CALC, ResultKind.CONVERT):
@@ -761,12 +798,12 @@ class ResultsPanel(QWidget):
                 font = QFont("Segoe UI Variable Display", 20, QFont.Weight.Thin)
                 litem.setFont(font)
                 litem.setForeground(QColor(255, 255, 255, 200))
-                litem.setSizeHint(QSize(0, 44))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
 
             elif ri.kind in (ResultKind.FILE, ResultKind.ACTION, ResultKind.NOTE):
                 # Use AppResultWidget to render files, actions, and notes cleanly
                 widget = AppResultWidget(ri)
-                litem.setSizeHint(widget.sizeHint())
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind == ResultKind.YT_FORMAT:
@@ -780,13 +817,13 @@ class ResultsPanel(QWidget):
                 widget = ConvertResultWidget(ri)
                 # When the button is clicked, we trigger the activation on the list item manually
                 widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
-                litem.setSizeHint(QSize(0, 50))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 50))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind == ResultKind.IMAGE_RESIZE:
                 widget = ConvertResultWidget(ri)
                 widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
-                litem.setSizeHint(QSize(0, 50))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 50))
                 self._list_widget.setItemWidget(litem, widget)
 
             else:

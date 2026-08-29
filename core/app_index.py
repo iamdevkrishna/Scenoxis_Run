@@ -25,8 +25,7 @@ SCAN_ROOTS = [
     os.path.expandvars(r"%USERPROFILE%\Desktop"),
     os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop"),
 ]
-
-FUZZY_THRESHOLD = 50      # minimum rapidfuzz score (0-100) — lowered for better recall
+FUZZY_THRESHOLD = 75      # minimum rapidfuzz score (0-100) — raised to prevent unrelated matches
 MAX_RESULTS     = 7       # max items shown in the results panel
 REFRESH_INTERVAL = 300    # seconds between background re-scans
 
@@ -73,8 +72,10 @@ class AppEntry:
 
     def __post_init__(self):
         self._norm = re.sub(r"[^a-z0-9 ]", "", self.name.lower()).strip()
-
-
+        if self.exe_path:
+            self.exe_path = os.path.expandvars(self.exe_path)
+        if self.icon_path:
+            self.icon_path = os.path.expandvars(self.icon_path)
 class AppIndex:
     """Thread-safe in-memory index of installed applications."""
 
@@ -127,6 +128,14 @@ class AppIndex:
             # Moderate boost: query appears as a complete word inside name
             elif (f" {norm_query} " in f" {name} "):
                 base = min(100, base + 20)
+            else:
+                if len(norm_query) >= 2:
+                    # Check acronyms (e.g., 'vsc' or 'vscode' matching 'visual studio code')
+                    words = name.lower().split()
+                    acronym = "".join(w[0] for w in words if w)
+                    # Require > 1 word so we don't boost "winrar" (w) for "whatsa"
+                    if len(acronym) > 1 and acronym and (acronym.startswith(norm_query) or norm_query.startswith(acronym)):
+                        base = max(base, 85)
 
             if base >= FUZZY_THRESHOLD:
                 scored.append((base, i, e))
@@ -202,13 +211,24 @@ class AppIndex:
             except Exception:
                 pass
 
-        # Deduplicate by exe_path, keep first occurrence
-        seen: set[str] = set()
-        unique: list[AppEntry] = []
+        # Deduplicate by name (preferring entries with an icon)
+        best_by_name: dict[str, AppEntry] = {}
         for e in entries:
+            name_key = e.name.lower().strip()
+            if name_key not in best_by_name:
+                best_by_name[name_key] = e
+            else:
+                existing = best_by_name[name_key]
+                if not existing.icon_path and e.icon_path:
+                    best_by_name[name_key] = e
+        
+        # Deduplicate by exe_path, keep first occurrence
+        seen_exe: set[str] = set()
+        unique: list[AppEntry] = []
+        for e in best_by_name.values():
             key = e.exe_path.lower()
-            if key not in seen:
-                seen.add(key)
+            if key not in seen_exe:
+                seen_exe.add(key)
                 unique.append(e)
 
         with self._lock:
