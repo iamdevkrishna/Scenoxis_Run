@@ -30,7 +30,7 @@ _SAVE_BOOKMARK_RE = re.compile(r"^(?:save|watch later|bookmark)\b", re.IGNORECAS
 _VIEW_BOOKMARKS_RE = re.compile(r"^(?:saved|bookmarks)$", re.IGNORECASE)
 
 # ── Converter ───────────────────────────────────────────────────────────────
-_CONVERT_RE = re.compile(r"^convert\s+(.+?)\s+(?:to|into)\s+([a-z0-9]+)", re.IGNORECASE)
+_CONVERT_RE = re.compile(r"^convert\s+(.+?)\s+(?:to|into)\s+(.+)$", re.IGNORECASE)
 
 # ── Resizer ─────────────────────────────────────────────────────────────────
 _RESIZE_RE = re.compile(r"^resize\s+(?:image\s+)?(?:to\s+)?(\d+)\s*(?:x|\*|by)\s*(\d+)", re.IGNORECASE)
@@ -119,8 +119,8 @@ def classify(query: str, app_index=None, active_tab_url: str = None) -> str:
             return "image_convert"
         
     # Also handle quick conversion like "100 usd to eur" (without the word "convert")
-    if re.match(r"^([\d.,]+)\s+([a-zA-Z]+)\s+to\s+([a-zA-Z]+)", q, re.IGNORECASE):
-        log.debug("classify → convert")
+    if re.match(r"^([\d.,]+)\s+(.+?)\s+(?:to|in)\s+(.+)$", q, re.IGNORECASE):
+        log.debug("classify -> convert")
         return "convert"
         
     if _RESIZE_RE.match(q):

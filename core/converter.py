@@ -75,13 +75,27 @@ _UNITS = {
     }
 }
 
+_CURRENCY_MAP = {
+    "us dollar": "USD", "us dollars": "USD", "american dollar": "USD", "american dollars": "USD",
+    "canadian dollar": "CAD", "canadian dollars": "CAD", "canadian": "CAD",
+    "indian rupee": "INR", "indian rupees": "INR", "rupee": "INR", "rupees": "INR",
+    "euro": "EUR", "euros": "EUR",
+    "british pound": "GBP", "british pounds": "GBP", "pound": "GBP", "pounds": "GBP", "sterling": "GBP",
+    "australian dollar": "AUD", "australian dollars": "AUD", "australian": "AUD",
+    "japanese yen": "JPY", "yen": "JPY",
+    "chinese yuan": "CNY", "yuan": "CNY", "renminbi": "CNY",
+    "swiss franc": "CHF", "franc": "CHF", "francs": "CHF",
+    "new zealand dollar": "NZD", "new zealand dollars": "NZD",
+    "singapore dollar": "SGD", "singapore dollars": "SGD"
+}
+
 def convert(amount: float, source: str, target: str) -> str:
     source = source.lower().strip()
     target = target.lower().strip()
     
     # Check currency first
-    source_cur = source.upper()
-    target_cur = target.upper()
+    source_cur = _CURRENCY_MAP.get(source, source).upper()
+    target_cur = _CURRENCY_MAP.get(target, target).upper()
     
     if source_cur in _rates and target_cur in _rates:
         # Convert to USD first, then to target

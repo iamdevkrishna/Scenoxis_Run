@@ -268,11 +268,10 @@ class AppResultWidget(QWidget):
 
     def __init__(self, item: ResultItem, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(44)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 12, 0)
+        layout.setContentsMargins(10, 10, 12, 10)
         layout.setSpacing(10)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
@@ -337,11 +336,10 @@ class ConvertResultWidget(QWidget):
 
     def __init__(self, item: ResultItem, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(50)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 12, 0)
+        layout.setContentsMargins(10, 13, 12, 13)
         layout.setSpacing(10)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
@@ -788,7 +786,7 @@ class ResultsPanel(QWidget):
 
             if ri.kind == ResultKind.APP:
                 widget = AppResultWidget(ri)
-                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), widget.sizeHint().height()))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind in (ResultKind.CALC, ResultKind.CONVERT):
@@ -798,12 +796,13 @@ class ResultsPanel(QWidget):
                 font = QFont("Segoe UI Variable Display", 20, QFont.Weight.Thin)
                 litem.setFont(font)
                 litem.setForeground(QColor(255, 255, 255, 200))
+                # For non-widget items, we can safely let QListWidget determine height automatically, or just give it 44
                 litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
 
             elif ri.kind in (ResultKind.FILE, ResultKind.ACTION, ResultKind.NOTE):
                 # Use AppResultWidget to render files, actions, and notes cleanly
                 widget = AppResultWidget(ri)
-                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 44))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), widget.sizeHint().height()))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind == ResultKind.YT_FORMAT:
@@ -817,13 +816,13 @@ class ResultsPanel(QWidget):
                 widget = ConvertResultWidget(ri)
                 # When the button is clicked, we trigger the activation on the list item manually
                 widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
-                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 50))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), widget.sizeHint().height()))
                 self._list_widget.setItemWidget(litem, widget)
 
             elif ri.kind == ResultKind.IMAGE_RESIZE:
                 widget = ConvertResultWidget(ri)
                 widget.choose_clicked.connect(lambda r=ri: self._on_item_activated_by_data(r))
-                litem.setSizeHint(QSize(self._list_widget.viewport().width(), 50))
+                litem.setSizeHint(QSize(self._list_widget.viewport().width(), widget.sizeHint().height()))
                 self._list_widget.setItemWidget(litem, widget)
 
             else:

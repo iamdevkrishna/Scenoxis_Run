@@ -5,13 +5,16 @@ import uuid
 import time
 from typing import List, Dict
 
+from core.config import get_config_dir
+
 log = logging.getLogger(__name__)
 
-NOTES_FILE = "data/notes.json"
+NOTES_FILE = os.path.join(get_config_dir(), "data", "notes.json")
 
 def _ensure_dir():
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    data_dir = os.path.dirname(NOTES_FILE)
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir, exist_ok=True)
 
 def get_notes() -> List[Dict]:
     if os.path.exists(NOTES_FILE):

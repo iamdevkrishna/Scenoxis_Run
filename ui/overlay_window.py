@@ -976,7 +976,7 @@ class OverlayWindow(QWidget):
         import re
         from core.converter import convert
         # Try to parse "amount source to target"
-        match = re.match(r"^([\d.,]+)\s+([a-zA-Z]+)\s+to\s+([a-zA-Z]+)", query, re.IGNORECASE)
+        match = re.match(r"^([\d.,]+)\s+(.+?)\s+(?:to|in)\s+(.+)$", query, re.IGNORECASE)
         if match:
             amount = float(match.group(1).replace(",", ""))
             source = match.group(2)
@@ -988,7 +988,7 @@ class OverlayWindow(QWidget):
                 return
         
         # Or parse "convert amount source to target"
-        match = re.match(r"^convert\s+([\d.,]+)\s+([a-zA-Z]+)\s+(?:to|into)\s+([a-zA-Z]+)", query, re.IGNORECASE)
+        match = re.match(r"^convert\s+([\d.,]+)\s+(.+?)\s+(?:to|into)\s+(.+)$", query, re.IGNORECASE)
         if match:
             amount = float(match.group(1).replace(",", ""))
             source = match.group(2)

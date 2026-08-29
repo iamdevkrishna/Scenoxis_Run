@@ -40,6 +40,12 @@ from PySide6.QtGui import QFontDatabase, QFont, QAction, QIcon
 
 
 # Enable High-DPI scaling before creating QApplication
+try:
+    import ctypes
+    ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    pass
+
 QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
 )
@@ -106,7 +112,7 @@ def main() -> int:
 
     # ── Global hotkey ─────────────────────────────────────────────────────
     # The hotkey callback is called on the Win32 pump thread; it emits
-    # window.toggle_visibility (a Qt signal) which is delivered safely
+    # window.toggle_visibility (a Qt signal) which is delivered safe
     # on the main thread via the event loop.
     registered = hotkey.register(window.hotkey_callback)
     if not registered:

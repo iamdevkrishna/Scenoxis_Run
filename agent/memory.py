@@ -17,10 +17,13 @@ from cryptography.fernet import Fernet
 import chromadb
 from chromadb.config import Settings
 
+from core.config import get_config_dir
+
 log = logging.getLogger(__name__)
 
-DATA_DIR     = Path("data/chroma")
-KEY_FILE     = Path("data/.memory_key")
+_base_data_dir = Path(get_config_dir()) / "data"
+DATA_DIR     = _base_data_dir / "chroma"
+KEY_FILE     = _base_data_dir / ".memory_key"
 PERSONAL_COL = "personal_memory"
 SESSION_COL  = "session_context"
 
