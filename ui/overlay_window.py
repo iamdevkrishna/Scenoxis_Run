@@ -216,15 +216,59 @@ class OverlayWindow(QWidget):
 
     def _setup_window(self):
         # DO NOT use FramelessWindowHint, as it breaks Windows 11 DWM backdrops on Insider builds.
-        # Instead, we use CustomizeWindowHint and Tool.
-        # Tool hides it from the taskbar and Alt+Tab, and disables standard DWM show animations!
+        # Instead, we use CustomizeWindowHint.
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Window |
-            Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.CustomizeWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        
+        # Windows 11: Remove from taskbar using COM ITaskbarList
+        # This allows us to avoid Qt.Tool (which forces square bottom corners on DWM)
+        try:
+            import ctypes
+            from ctypes import wintypes
+            from ctypes import c_void_p, HRESULT, POINTER, WINFUNCTYPE
+            
+            class GUID(ctypes.Structure):
+                _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
+                            ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_uint8 * 8)]
+                            
+            def GUID_from_string(guid_str):
+                guid = GUID()
+                ctypes.windll.ole32.CLSIDFromString(ctypes.c_wchar_p(guid_str), ctypes.byref(guid))
+                return guid
+                
+            CLSID_TaskbarList = GUID_from_string("{56FDF344-FD6D-11D0-958A-006097C9A090}")
+            IID_ITaskbarList = GUID_from_string("{56FDF342-FD6D-11D0-958A-006097C9A090}")
+            
+            class ITaskbarListVtbl(ctypes.Structure):
+                _fields_ = [
+                    ("QueryInterface", c_void_p), ("AddRef", c_void_p), ("Release", c_void_p),
+                    ("HrInit", WINFUNCTYPE(HRESULT, c_void_p)),
+                    ("AddTab", WINFUNCTYPE(HRESULT, c_void_p, wintypes.HWND)),
+                    ("DeleteTab", WINFUNCTYPE(HRESULT, c_void_p, wintypes.HWND)),
+                    ("ActivateTab", WINFUNCTYPE(HRESULT, c_void_p, wintypes.HWND)),
+                    ("SetActiveAlt", WINFUNCTYPE(HRESULT, c_void_p, wintypes.HWND)),
+                ]
+            class ITaskbarList(ctypes.Structure):
+                _fields_ = [("lpVtbl", POINTER(ITaskbarListVtbl))]
+                
+            ctypes.windll.ole32.CoInitialize(None)
+            taskbar = POINTER(ITaskbarList)()
+            res = ctypes.windll.ole32.CoCreateInstance(
+                ctypes.byref(CLSID_TaskbarList), None, 1, 
+                ctypes.byref(IID_ITaskbarList), ctypes.byref(taskbar)
+            )
+            if res == 0:
+                taskbar.contents.lpVtbl.contents.HrInit(taskbar)
+                hwnd = int(self.winId())
+                taskbar.contents.lpVtbl.contents.DeleteTab(taskbar, hwnd)
+                self._taskbar = taskbar # Keep reference alive
+        except Exception as e:
+            log.error(f"Failed to hide from taskbar: {e}")
+
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.setWindowTitle("Scenoxis Run")
         self.setObjectName("ScenoxisOverlay")
